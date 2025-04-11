@@ -45,7 +45,7 @@ Request body example:
     {
       "user": "Hardik",
       "timestamp": "1716292517.637399",
-      "message": "Got it, then let's have it offline next week only"
+      "message": "Got it, then lets have it offline next week only"
     },
     {
       "user": "Murali",
@@ -78,6 +78,35 @@ GET /conversations/
 ```
 GET /conversations/{conversation_id}
 ```
+
+### Verify Message Embedding
+
+```
+GET /conversations/messages/{message_id}/embedding
+```
+
+### Search for Similar Messages
+
+```
+GET /conversations/search/similar?query=Let's meet next week
+```
+
+### Reset Database (Admin Endpoint)
+
+```
+POST /admin/reset-database
+```
+
+> ⚠️ **WARNING**: This endpoint will drop all tables and recreate them, resulting in loss of all data. Use with caution!
+
+## Data Persistence
+
+The application uses named Docker volumes to ensure data is persisted across restarts:
+
+- `postgres_data_ai_social_app` - Stores PostgreSQL database files
+- `ollama_data_ai_social_app` - Stores Ollama models and data
+
+This ensures that your data remains available even if you restart the containers or your system.
 
 ## Architecture
 
