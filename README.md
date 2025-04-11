@@ -8,6 +8,7 @@ A backend application for a personality-based social app that allows uploading S
 - Store conversations with embeddings in PostgreSQL with TimescaleDB and pgAI
 - Associate conversations with specific users/personalities
 - Asynchronous embedding generation using pgAI's vectorizer-worker
+- Duplicate conversation detection to prevent data duplication
 
 ## Setup
 
@@ -67,6 +68,14 @@ Request body example:
 }
 ```
 
+The endpoint will automatically detect and prevent duplicate conversations based on the source and message timestamps. If a duplicate is detected, the API will return the existing conversation with a 200 status code and include duplicate detection information.
+
+To bypass duplicate detection (if needed), you can use the `skip_duplicate_check` query parameter:
+
+```
+POST /conversations/?skip_duplicate_check=true
+```
+
 ### Get All Conversations
 
 ```
@@ -99,6 +108,41 @@ POST /admin/reset-database
 
 > ⚠️ **WARNING**: This endpoint will drop all tables and recreate them, resulting in loss of all data. Use with caution!
 
+## Testing and Verification
+
+### Running Tests
+
+The application includes a comprehensive test suite to verify functionality. To run tests:
+
+```bash
+# Install test dependencies
+pip install -e ".[test]"
+
+# Run the test suite
+pytest
+```
+
+### Sanity Check
+
+A sanity check script is provided to verify the end-to-end flow of the application. This script:
+
+1. Checks API health
+2. Uploads a sample conversation
+3. Retrieves the conversation
+4. Verifies embedding generation
+5. Performs a similarity search
+6. Tests duplicate detection
+7. Tests non-duplicate detection
+
+To run the sanity check:
+
+```bash
+# With the application running
+python scripts/sanity_check.py
+```
+
+This provides a quick way to verify that all components are working correctly after setup or changes.
+
 ## Data Persistence
 
 The application uses named Docker volumes to ensure data is persisted across restarts:
@@ -119,9 +163,10 @@ The application uses the following components:
 - **pgAI Vectorizer Worker** - Asynchronous worker for generating embeddings
 
 When a conversation is uploaded:
-1. The conversation and its messages are stored in the database
-2. The vectorizer worker is notified to generate embeddings for each message
-3. Embeddings are stored in the database for later search and retrieval
+1. The system checks for potential duplicates based on source and timestamp patterns
+2. If not a duplicate, the conversation and its messages are stored in the database
+3. The vectorizer worker is notified to generate embeddings for each message
+4. Embeddings are stored in the database for later search and retrieval
 
 ## Development
 
