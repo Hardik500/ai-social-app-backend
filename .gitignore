@@ -1,4 +1,7 @@
-env.
+# Python Environment
+env
+
+# Environment Variables
 .env
 .env.local
 .env.development.local
@@ -6,3 +9,10 @@ env.
 .env.production.local
 .env.development
 .env.test
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
