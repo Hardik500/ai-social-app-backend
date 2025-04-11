@@ -1,7 +1,8 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Float
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import ARRAY, VECTOR
+from sqlalchemy.dialects.postgresql import ARRAY
+import pgvector.sqlalchemy
 
 from app.db.database import Base
 
@@ -28,7 +29,7 @@ class Message(Base):
     content = Column(Text)
     timestamp = Column(String(50))  # Original timestamp from the source
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    embedding = Column(VECTOR(1536))  # For embeddings (1536 is the dimension for most Ollama models)
+    embedding = Column(pgvector.sqlalchemy.Vector(768))  # For embeddings (dimension is 768 for nomic-embed-text)
     
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")

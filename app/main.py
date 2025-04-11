@@ -9,7 +9,8 @@ from app.db.database import Base, engine
 # Load environment variables
 load_dotenv()
 
-# Create database tables
+# Drop and recreate database tables
+Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 
 # Initialize FastAPI app

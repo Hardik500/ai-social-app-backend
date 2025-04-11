@@ -20,8 +20,11 @@ def get_db():
     finally:
         db.close()
 
-# Enable pgAI extension on first connect
+# Enable vector extension on first connect
 @event.listens_for(engine, "first_connect")
 def enable_extensions(connect, connection_record):
-    connect.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    connect.execute("CREATE EXTENSION IF NOT EXISTS pgai")  # For TimescaleDB pgAI 
+    cursor = connect.cursor()
+    cursor.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    cursor.execute("CREATE EXTENSION IF NOT EXISTS ai CASCADE;")
+    cursor.close()
+    connect.commit() 

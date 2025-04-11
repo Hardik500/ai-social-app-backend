@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 import asyncio
+from sqlalchemy import text
+import numpy as np
 
 from app.db.database import get_db
 from app.models.schemas import ConversationCreate, ConversationResponse
@@ -53,28 +55,20 @@ async def create_conversation(conversation_data: ConversationCreate, db: Session
             db.commit()
             db.refresh(msg_user)
         
-        # Create message without embedding initially
+        # Generate embedding for message
+        embedding = await embedding_service.generate_embedding(msg_data.message)
+        
+        # Create message with embedding
         new_message = Message(
             conversation_id=new_conversation.id,
             user_id=msg_user.id,
             content=msg_data.message,
             timestamp=msg_data.timestamp,
+            embedding=embedding
         )
         db.add(new_message)
-        db.commit()
-        db.refresh(new_message)
-        
-        # Schedule embedding generation with pgAI
-        embedding_service.schedule_embedding_generation(
-            db=db,
-            text=msg_data.message,
-            table="messages",
-            id_column="id",
-            id_value=new_message.id,
-            text_column="content",
-            embedding_column="embedding"
-        )
     
+    db.commit()
     db.refresh(new_conversation)
     
     return new_conversation
@@ -97,3 +91,80 @@ def get_all_conversations(skip: int = 0, limit: int = 100, db: Session = Depends
     """Get all conversations with pagination."""
     conversations = db.query(Conversation).offset(skip).limit(limit).all()
     return conversations 
+
+@router.get("/messages/{message_id}/embedding")
+def get_message_embedding(message_id: int, db: Session = Depends(get_db)):
+    """Get a specific message's embedding to verify it exists."""
+    message = db.query(Message).filter(Message.id == message_id).first()
+    
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail=f"Message with ID {message_id} not found"
+        )
+    
+    # Return message details with embedding
+    return {
+        "id": message.id,
+        "content": message.content,
+        "embedding_exists": message.embedding is not None,
+        "embedding_dimensions": len(message.embedding) if message.embedding is not None else None,
+        "embedding_sample": message.embedding[:5].tolist() if message.embedding is not None else None
+    }
+
+@router.get("/search/similar")
+def search_similar_messages(query: str, limit: int = 5, db: Session = Depends(get_db)):
+    """
+    Search for messages similar to the query string.
+    Uses cosine similarity to find semantically similar messages.
+    """
+    try:
+        # First, we need to get all messages with their embeddings
+        messages = db.query(Message, User.username).join(User).all()
+        
+        if not messages:
+            return {
+                "query": query,
+                "similar_messages": [],
+                "message": "No messages found to compare against"
+            }
+        
+        # Generate embedding for the query
+        query_embedding = asyncio.run(embedding_service.generate_embedding(query))
+        
+        # Calculate cosine similarity manually
+        similar_messages = []
+        
+        # Function to calculate cosine similarity between two vectors
+        def cosine_similarity(vec1, vec2):
+            dot_product = np.dot(vec1, vec2)
+            norm_a = np.linalg.norm(vec1)
+            norm_b = np.linalg.norm(vec2)
+            return dot_product / (norm_a * norm_b)
+        
+        for message, username in messages:
+            # Calculate similarity
+            similarity = cosine_similarity(np.array(message.embedding), np.array(query_embedding))
+            
+            similar_messages.append({
+                "id": message.id,
+                "content": message.content,
+                "username": username,
+                "conversation_id": message.conversation_id,
+                "similarity_score": float(similarity)
+            })
+        
+        # Sort by similarity (highest first)
+        similar_messages.sort(key=lambda x: x["similarity_score"], reverse=True)
+        
+        # Return only the top 'limit' results
+        return {
+            "query": query,
+            "similar_messages": similar_messages[:limit]
+        }
+    except Exception as e:
+        return {
+            "query": query,
+            "error": str(e),
+            "similar_messages": []
+        } 
