@@ -130,20 +130,34 @@ async def create_conversation(conversation_data: ConversationCreate, skip_duplic
             )
     
     # Check if user exists or create a new one
-    user = db.query(User).filter(User.username == conversation_data.user_info.username).first()
+    user = db.query(User).filter(User.username == conversation_data.primary_user_info.username).first()
     
     if not user:
         user = User(
-            username=conversation_data.user_info.username,
-            email=conversation_data.user_info.email,
-            phone=conversation_data.user_info.phone,
-            description=conversation_data.user_info.description
+            username=conversation_data.primary_user_info.username,
+            email=conversation_data.primary_user_info.email,
+            phone=conversation_data.primary_user_info.phone,
+            description=conversation_data.primary_user_info.description
         )
         db.add(user)
         db.commit()
         db.refresh(user)
     
-    # Create conversation
+   
+    # Process additional users if provided
+    for additional_user_info in conversation_data.additional_users:
+        additional_user = db.query(User).filter(User.username == additional_user_info.username).first()
+        if not additional_user:
+            additional_user = User(
+                username=additional_user_info.username,
+                email=additional_user_info.email,
+                phone=additional_user_info.phone,
+                description=additional_user_info.description
+            )
+            db.add(additional_user)
+            db.commit()
+            db.refresh(additional_user)
+ # Create conversation
     new_conversation = Conversation(
         source=conversation_data.source,
         user_id=user.id
@@ -154,7 +168,7 @@ async def create_conversation(conversation_data: ConversationCreate, skip_duplic
     
     # Process messages
     for msg_data in conversation_data.messages:
-        # Find or create user for this message
+        # Find user for this message (might already exist from additional_users)
         msg_user = db.query(User).filter(User.username == msg_data.user).first()
         if not msg_user:
             msg_user = User(username=msg_data.user)

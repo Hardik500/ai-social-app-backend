@@ -43,7 +43,8 @@ class MessageResponse(BaseModel):
 class ConversationCreate(BaseModel):
     source: Optional[str] = "slack"
     messages: List[MessageBase]
-    user_info: UserBase
+    primary_user_info: UserBase
+    additional_users: List[UserBase] = []
 
 class ConversationResponse(BaseModel):
     id: int

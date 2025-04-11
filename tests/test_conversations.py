@@ -22,12 +22,20 @@ TEST_CONVERSATION = {
             "message": "awesome. will catch up with you in person then"
         }
     ],
-    "user_info": {
+    "primary_user_info": {
         "username": "Hardik",
         "email": "hardik@example.com",
         "phone": "1234567890",
         "description": "Tech enthusiast and developer"
-    }
+    },
+    "additional_users": [
+        {
+            "username": "Murali",
+            "email": "murali@example.com",
+            "phone": "9876543210",
+            "description": "Product manager"
+        }
+    ]
 }
 
 # Mock embedding function to avoid calling Ollama
@@ -181,3 +189,44 @@ def test_skip_duplicate_detection(client, mock_embedding_service):
     
     # The IDs should be different
     assert response1.json()["id"] != response2.json()["id"] 
+def test_additional_users_handling(client, mock_embedding_service):
+    """Test that additional users are correctly created in the database"""
+    response = client.post("/conversations/", json=TEST_CONVERSATION)
+    assert response.status_code == 201
+    
+    # Verify the conversation was created
+    conversation_id = response.json()["id"]
+    
+    # Check that both users exist in the database
+    # First get the database connection from the application (this is a test-specific approach)
+    from app.db.database import get_db
+    from app.models.user import User
+    
+    # Get a DB session
+    db = next(get_db())
+    
+    # Check that primary user exists with full details
+    primary_user = db.query(User).filter(User.username == "Hardik").first()
+    assert primary_user is not None
+    assert primary_user.email == "hardik@example.com"
+    assert primary_user.phone == "1234567890"
+    assert primary_user.description == "Tech enthusiast and developer"
+    
+    # Check that additional user exists with full details
+    additional_user = db.query(User).filter(User.username == "Murali").first()
+    assert additional_user is not None
+    assert additional_user.email == "murali@example.com" 
+    assert additional_user.phone == "9876543210"
+    assert additional_user.description == "Product manager"
+    
+    # Verify the messages are associated with the correct users
+    conversation_response = client.get(f"/conversations/{conversation_id}")
+    data = conversation_response.json()
+    
+    # Get the message by Hardik
+    hardik_message = next(msg for msg in data["messages"] if db.query(User).get(msg["user_id"]).username == "Hardik")
+    assert hardik_message["content"] == "Got it, then lets have it offline next week only"
+    
+    # Get the message by Murali
+    murali_message = next(msg for msg in data["messages"] if db.query(User).get(msg["user_id"]).username == "Murali")
+    assert murali_message["content"] == "awesome. will catch up with you in person then"

@@ -59,12 +59,20 @@ Request body example:
       "message": "so most of next week and BRP week"
     }
   ],
-  "user_info": {
+  "primary_user_info": {
     "username": "Hardik",
     "email": "hardik@example.com",
     "phone": "1234567890",
     "description": "Tech enthusiast and developer"
-  }
+  },
+  "additional_users": [
+    {
+      "username": "Murali",
+      "email": "murali@example.com",
+      "phone": "9876543210",
+      "description": "Product manager"
+    }
+  ]
 }
 ```
 
