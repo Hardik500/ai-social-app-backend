@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Dict, Set
 import asyncio
 from sqlalchemy import text
 import numpy as np
+import statistics
+from sqlalchemy import and_, or_
 
 from app.db.database import get_db
 from app.models.schemas import ConversationCreate, ConversationResponse
@@ -16,12 +19,116 @@ router = APIRouter(
     tags=["conversations"]
 )
 
+def is_potential_duplicate(db: Session, conversation_data: ConversationCreate, timestamp_tolerance: float = 5.0) -> Dict:
+    """
+    Check if a conversation is potentially a duplicate by comparing source and timestamps.
+    
+    Args:
+        db: Database session
+        conversation_data: The conversation data to check
+        timestamp_tolerance: Time difference in seconds to consider timestamps as matching
+        
+    Returns:
+        Dict with 'is_duplicate' bool and 'existing_conversation' if a duplicate is found
+    """
+    # Get the source
+    source = conversation_data.source
+    
+    # Extract timestamps from messages and convert to float
+    message_timestamps = [float(msg.timestamp.split('.')[0]) for msg in conversation_data.messages]
+    
+    if not message_timestamps:
+        return {"is_duplicate": False, "existing_conversation": None}
+    
+    # Calculate median timestamp to use as reference point
+    median_timestamp = statistics.median(message_timestamps)
+    
+    # Find min and max timestamp with tolerance
+    min_timestamp = min(message_timestamps) - timestamp_tolerance
+    max_timestamp = max(message_timestamps) + timestamp_tolerance
+    
+    # Query for conversations with the same source
+    potential_duplicates = db.query(Conversation).filter(
+        Conversation.source == source
+    ).all()
+    
+    for conv in potential_duplicates:
+        # Get all messages for this conversation
+        messages = db.query(Message).filter(Message.conversation_id == conv.id).all()
+        
+        if not messages:
+            continue
+            
+        # Extract timestamps from existing messages
+        existing_timestamps = [float(msg.timestamp.split('.')[0]) for msg in messages]
+        
+        # Check if the timestamps overlap
+        existing_min = min(existing_timestamps)
+        existing_max = max(existing_timestamps)
+        
+        # Check if there's significant overlap between timestamp ranges
+        if (min_timestamp <= existing_max and max_timestamp >= existing_min) or \
+           (existing_min <= max_timestamp and existing_max >= min_timestamp):
+            
+            # Calculate how many messages have matching timestamps (within tolerance)
+            matching_count = 0
+            total_count = len(message_timestamps)
+            
+            for ts in message_timestamps:
+                if any(abs(ts - existing_ts) <= timestamp_tolerance for existing_ts in existing_timestamps):
+                    matching_count += 1
+            
+            # If more than 50% of messages match by timestamp, consider it a duplicate
+            if matching_count / total_count > 0.5:
+                return {
+                    "is_duplicate": True, 
+                    "existing_conversation": conv,
+                    "match_percentage": matching_count / total_count * 100
+                }
+    
+    return {"is_duplicate": False, "existing_conversation": None}
+
 @router.post("/", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
-async def create_conversation(conversation_data: ConversationCreate, db: Session = Depends(get_db)):
+async def create_conversation(conversation_data: ConversationCreate, skip_duplicate_check: bool = False, db: Session = Depends(get_db)):
     """
     Upload a conversation with messages and associate it with a user.
     If the user doesn't exist, it will be created.
+    Checks for duplicate conversations based on source and timestamps.
+    
+    Parameters:
+    - conversation_data: The conversation data to upload
+    - skip_duplicate_check: If True, bypass duplicate checking (default: False)
     """
+    # Check for duplicates if not explicitly skipped
+    if not skip_duplicate_check:
+        duplicate_check = is_potential_duplicate(db, conversation_data)
+        if duplicate_check["is_duplicate"]:
+            # Return the existing conversation with a different status code to indicate it's a duplicate
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "id": duplicate_check["existing_conversation"].id,
+                    "source": duplicate_check["existing_conversation"].source,
+                    "user_id": duplicate_check["existing_conversation"].user_id,
+                    "created_at": duplicate_check["existing_conversation"].created_at.isoformat(),
+                    "messages": [
+                        {
+                            "id": msg.id,
+                            "content": msg.content,
+                            "timestamp": msg.timestamp,
+                            "user_id": msg.user_id,
+                            "conversation_id": msg.conversation_id,
+                            "created_at": msg.created_at.isoformat()
+                        } 
+                        for msg in duplicate_check["existing_conversation"].messages
+                    ],
+                    "duplicate_detection": {
+                        "is_duplicate": True,
+                        "match_percentage": duplicate_check["match_percentage"]
+                    }
+                }
+            )
+    
     # Check if user exists or create a new one
     user = db.query(User).filter(User.username == conversation_data.user_info.username).first()
     

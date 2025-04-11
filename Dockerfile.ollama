@@ -1,0 +1,18 @@
+FROM ollama/ollama:latest
+
+USER root
+
+# Install curl for health check
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Create directory for scripts
+RUN mkdir -p /setup-scripts
+
+# Copy setup script
+COPY scripts/setup_ollama.sh /setup-scripts/
+
+# Make script executable
+RUN chmod +x /setup-scripts/setup_ollama.sh
+
+# Entrypoint will start Ollama in the background and then run our setup script
+ENTRYPOINT ["/bin/sh", "-c", "ollama serve & sleep 5 && /setup-scripts/setup_ollama.sh && wait"] 
