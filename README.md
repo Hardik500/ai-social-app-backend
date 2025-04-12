@@ -108,6 +108,67 @@ GET /conversations/messages/{message_id}/embedding
 GET /conversations/search/similar?query=Let's meet next week
 ```
 
+### Personality Profile Management
+
+#### Generate a Personality Profile
+
+```
+POST /personalities/users/{username}/generate
+```
+
+This endpoint analyzes all messages from a user to generate a detailed personality profile. The profile includes:
+
+- Personality traits (Big Five dimensions)
+- Communication style
+- Interests and values
+- A system prompt for simulating user responses
+
+A user must have at least 5 messages in the database to generate a profile.
+
+#### Get User's Personality Profiles
+
+```
+GET /personalities/users/{username}
+```
+
+You can add the `active_only=true` query parameter to get only the currently active profile:
+
+```
+GET /personalities/users/{username}?active_only=true
+```
+
+#### Get a Specific Profile by ID
+
+```
+GET /personalities/profiles/{profile_id}
+```
+
+#### Ask a Question to a User (Personality Simulation)
+
+```
+POST /personalities/users/{username}/ask
+```
+
+Request body example:
+
+```json
+{
+  "question": "What do you think about using React for this project?"
+}
+```
+
+Response example:
+
+```json
+{
+  "question": "What do you think about using React for this project?",
+  "answer": "I think React would be a solid choice for the frontend. I've used it on several projects and it's quite efficient for building component-based UIs. The ecosystem is mature and there's plenty of support available when you run into issues.",
+  "username": "Hardik"
+}
+```
+
+This endpoint uses the user's personality profile to generate a response that matches their communication style, interests, and personality traits.
+
 ### Reset Database (Admin Endpoint)
 
 ```

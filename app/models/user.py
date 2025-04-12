@@ -18,4 +18,5 @@ class User(Base):
     
     # Relationships
     conversations = relationship("Conversation", back_populates="user")
-    messages = relationship("Message", back_populates="user") 
+    messages = relationship("Message", back_populates="user")
+    personality_profiles = relationship("PersonalityProfile", back_populates="user", cascade="all, delete-orphan") 

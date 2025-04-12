@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, EmailStr
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 # User schemas
@@ -54,4 +54,33 @@ class ConversationResponse(BaseModel):
     messages: List[MessageResponse]
     
     class Config:
-        from_attributes = True 
+        from_attributes = True
+
+# Personality Profile schemas
+class PersonalityProfileBase(BaseModel):
+    traits: Dict[str, Any]
+    description: str
+    system_prompt: str
+
+class PersonalityProfileCreate(PersonalityProfileBase):
+    pass
+
+class PersonalityProfileResponse(PersonalityProfileBase):
+    id: int
+    user_id: int
+    generated_at: datetime
+    updated_at: Optional[datetime]
+    is_active: bool
+    message_count: int
+    
+    class Config:
+        from_attributes = True
+
+# Question/Answer schemas
+class QuestionRequest(BaseModel):
+    question: str
+
+class AnswerResponse(BaseModel):
+    question: str
+    answer: str
+    username: str 

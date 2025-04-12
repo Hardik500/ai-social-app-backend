@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pull the required Ollama model for embeddings
+# Pull the required Ollama models for embeddings and chat
 
 echo "Setting up Ollama models..."
 
@@ -21,5 +21,9 @@ done
 # Pull the embedding model
 echo "Pulling nomic-embed-text model..."
 ollama pull nomic-embed-text
+
+# Pull the chat model for personality simulation
+echo "Pulling llama3 model..."
+ollama pull llama3
 
 echo "Ollama setup complete!" 
