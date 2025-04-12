@@ -12,6 +12,7 @@ from app.models.user import User
 from app.models.conversation import Message
 from app.models.personality import PersonalityProfile
 from app.services.embedding_service import embedding_service
+from app.core.prompt_manager import prompt_manager
 
 load_dotenv()
 
@@ -48,17 +49,8 @@ class PersonalityService:
         # Concatenate messages into a single document
         message_texts = [msg.content for msg in messages]
         
-        # Create user profile generation system prompt
-        system_prompt = """
-        You are a professional personality analyzer. Based on the text messages provided, create a detailed personality profile.
-        Analyze writing style, tone, values, interests, communication patterns, and personality traits.
-        Format your analysis as a JSON object with these sections:
-        1. traits: Include Big Five personality dimensions (openness, conscientiousness, extraversion, agreeableness, neuroticism) scored 1-10
-        2. communication_style: Formal/informal, verbose/concise, emotional/logical, etc.
-        3. interests: What topics they seem interested in
-        4. values: What matters to them based on their writing
-        5. summary: A 1-paragraph summary of their personality
-        """
+        # Get the analysis system prompt from prompt manager
+        system_prompt = prompt_manager.get_template("personality_analysis")
         
         # Request personality analysis from LLM
         traits_and_description = await self._generate_analysis(message_texts, system_prompt)
@@ -74,54 +66,42 @@ class PersonalityService:
         values = traits_and_description.get("values", [])
         summary = traits_and_description.get("summary", "")
         
-        # Create a more complete description from the analysis
-        description = f"""
-        **Personality Summary**
-        {summary}
+        # Format the description using the template
+        description = prompt_manager.format_template(
+            "description_template",
+            summary=summary,
+            openness=traits.get('openness', 'N/A'),
+            conscientiousness=traits.get('conscientiousness', 'N/A'),
+            extraversion=traits.get('extraversion', 'N/A'),
+            agreeableness=traits.get('agreeableness', 'N/A'),
+            neuroticism=traits.get('neuroticism', 'N/A'),
+            communication_style=communication_style if isinstance(communication_style, str) else 
+                                ', '.join([f'{k}: {v}' for k, v in communication_style.items()]) 
+                                if isinstance(communication_style, dict) else communication_style,
+            interests=interests if isinstance(interests, str) else 
+                      ', '.join(interests) if isinstance(interests, list) else interests,
+            values=values if isinstance(values, str) else 
+                   ', '.join(values) if isinstance(values, list) else values
+        )
         
-        **Core Traits**
-        - Openness: {traits.get('openness', 'N/A')}/10
-        - Conscientiousness: {traits.get('conscientiousness', 'N/A')}/10
-        - Extraversion: {traits.get('extraversion', 'N/A')}/10
-        - Agreeableness: {traits.get('agreeableness', 'N/A')}/10
-        - Neuroticism: {traits.get('neuroticism', 'N/A')}/10
-        
-        **Communication Style**
-        {', '.join([f'{k}: {v}' for k, v in communication_style.items()]) if isinstance(communication_style, dict) else communication_style}
-        
-        **Interests**
-        {', '.join(interests) if isinstance(interests, list) else interests}
-        
-        **Values**
-        {', '.join(values) if isinstance(values, list) else values}
-        """
-        
-        # Create a system prompt for simulating this user's responses
-        system_prompt = f"""
-        You are roleplaying as {user.username}. Match their communication patterns and personality exactly!
-        
-        Key personality traits:
-        - Openness: {traits.get('openness', 5)}/10
-        - Conscientiousness: {traits.get('conscientiousness', 5)}/10
-        - Extraversion: {traits.get('extraversion', 5)}/10
-        - Agreeableness: {traits.get('agreeableness', 5)}/10
-        - Neuroticism: {traits.get('neuroticism', 5)}/10
-        
-        Communication style: {', '.join([f'{k}: {v}' for k, v in communication_style.items()]) if isinstance(communication_style, dict) else communication_style}
-        
-        Interests: {', '.join(interests) if isinstance(interests, list) else interests}
-        
-        Values: {', '.join(values) if isinstance(values, list) else values}
-        
-        Personality summary: {summary}
-        
-        Additional guidance:
-        - Match their speaking style exactly
-        - Use similar sentence structures and vocabulary
-        - Maintain their level of formality/informality
-        - Express opinions consistent with their values
-        - Always respond from first-person perspective as {user.username}
-        """
+        # Format the system prompt for simulation using the template
+        system_prompt = prompt_manager.format_template(
+            "personality_simulation",
+            username=user.username,
+            openness=traits.get('openness', 5),
+            conscientiousness=traits.get('conscientiousness', 5),
+            extraversion=traits.get('extraversion', 5),
+            agreeableness=traits.get('agreeableness', 5),
+            neuroticism=traits.get('neuroticism', 5),
+            communication_style=communication_style if isinstance(communication_style, str) else 
+                                ', '.join([f'{k}: {v}' for k, v in communication_style.items()]) 
+                                if isinstance(communication_style, dict) else communication_style,
+            interests=interests if isinstance(interests, str) else 
+                      ', '.join(interests) if isinstance(interests, list) else interests,
+            values=values if isinstance(values, str) else 
+                   ', '.join(values) if isinstance(values, list) else values,
+            summary=summary
+        )
         
         # Generate embedding for description (for similarity search later)
         embedding = await embedding_service.generate_embedding(description)

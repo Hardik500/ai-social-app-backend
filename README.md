@@ -255,4 +255,14 @@ The application uses the following environment variables:
 - `OLLAMA_BASE_URL`: URL for Ollama API
 - `API_HOST`: Host to bind the API server
 - `API_PORT`: Port to bind the API server
-- `ENVIRONMENT`: Application environment (development, production) 
+- `ENVIRONMENT`: Application environment (development, production)
+
+## Personality Prompts
+
+The system uses text prompt templates to generate personality profiles and simulate responses from users. These templates are stored in the `app/core/prompts/` directory:
+
+- `personality_analysis.txt`: System prompt for analyzing user messages and generating a personality profile
+- `personality_simulation.txt`: Template for simulating user responses based on their personality profile
+- `description_template.txt`: Template for formatting the human-readable personality description
+
+To modify how the AI interprets personalities or how it simulates user responses, you can edit these text files without changing any code. 

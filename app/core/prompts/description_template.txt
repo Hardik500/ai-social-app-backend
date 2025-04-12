@@ -1,0 +1,18 @@
+**Personality Summary**
+{summary}
+
+**Core Traits**
+- Openness: {openness}/10
+- Conscientiousness: {conscientiousness}/10
+- Extraversion: {extraversion}/10
+- Agreeableness: {agreeableness}/10
+- Neuroticism: {neuroticism}/10
+
+**Communication Style**
+{communication_style}
+
+**Interests**
+{interests}
+
+**Values**
+{values} 
