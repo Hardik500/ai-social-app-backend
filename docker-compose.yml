@@ -9,40 +9,70 @@ services:
     volumes:
       - ./:/app
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/social_app
       - OLLAMA_BASE_URL=http://ollama:11434
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - ENVIRONMENT=development
     depends_on:
-      - db
-      - ollama
-      - vectorizer-worker
-      - redis
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      redis:
+        condition: service_started
     networks:
       - app-network
+    container_name: api
+    restart: always
+    command: >
+      bash -c "
+        echo 'Waiting for database to be ready...'
+        sleep 5
+        echo 'Database should be up - starting API'
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   db:
     image: timescale/timescaledb-ha:pg17
     environment:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_USER=postgres
-      - POSTGRES_DB=postgres
+      - POSTGRES_DB=social_app
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/home/postgres/pgdata/data
     command: [ "-c", "ai.ollama_host=http://ollama:11434" ]
+    networks:
+      - app-network
+    container_name: db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     
   vectorizer-worker:
     image: timescale/pgai-vectorizer-worker:latest
     environment:
-      PGAI_VECTORIZER_WORKER_DB_URL: postgres://postgres:postgres@db:5432/postgres
+      PGAI_VECTORIZER_WORKER_DB_URL: postgres://postgres:postgres@db:5432/social_app
       OLLAMA_HOST: http://ollama:11434
     command: [ "--poll-interval", "5s", "--log-level", "DEBUG" ]
     depends_on:
-      - db
-      - ollama
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - app-network
+    container_name: vectorizer-worker
       
   ollama:
     build:
@@ -57,6 +87,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - app-network
+    container_name: ollama
   
   redis:
     image: redis:7-alpine
@@ -68,6 +101,12 @@ services:
       - app-network
     restart: always
     command: redis-server --save 60 1 --loglevel warning
+    container_name: redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
