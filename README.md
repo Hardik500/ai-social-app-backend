@@ -9,6 +9,30 @@ A backend application for a personality-based social app that allows uploading S
 - Associate conversations with specific users/personalities
 - Asynchronous embedding generation using pgAI's vectorizer-worker
 - Duplicate conversation detection to prevent data duplication
+- Caching system for fast response generation
+- Parallel processing for performance optimization
+- Streaming responses for better user experience
+
+## Performance Optimizations
+
+### Caching System
+- In-memory caching for frequently accessed responses
+- Redis-based persistent caching (configurable via `REDIS_URL`)
+- Automatic cache invalidation and pruning
+
+### Parallel Processing
+- Batch processing of messages for analysis
+- Concurrent embedding generation
+- Background preloading of common questions
+
+### Streaming Responses
+- Real-time token streaming for faster perceived response times
+- Compatible with front-end incremental display
+
+### Other Optimizations
+- Rate limiting for external API calls
+- Background tasks for non-critical operations
+- Preloading of related follow-up questions
 
 ## Setup
 
@@ -169,6 +193,30 @@ Response example:
 
 This endpoint uses the user's personality profile to generate a response that matches their communication style, interests, and personality traits.
 
+##### Streaming Responses
+
+For improved user experience, you can request streaming responses by adding the `stream=true` query parameter:
+
+```
+POST /personalities/users/{username}/ask?stream=true
+```
+
+The response will be a stream of JSON objects, each containing a token or chunk of the response:
+
+```json
+{"type":"token","content":"I ","done":false}
+{"type":"token","content":"think ","done":false}
+{"type":"token","content":"React ","done":false}
+...
+{"type":"complete","content":"I think React would be a solid choice for the frontend...","done":true}
+```
+
+For cached responses, you'll receive a single chunk with the complete answer:
+
+```json
+{"type":"cached","content":"I think React would be a solid choice for the frontend...","done":true}
+```
+
 ### Reset Database (Admin Endpoint)
 
 ```
@@ -253,6 +301,9 @@ The application uses the following environment variables:
 
 - `DATABASE_URL`: PostgreSQL connection string
 - `OLLAMA_BASE_URL`: URL for Ollama API
+- `OLLAMA_CHAT_MODEL`: Model name for chat functionality (default: llama3)
+- `OLLAMA_EMBEDDING_MODEL`: Model name for embeddings (default: nomic-embed-text)
+- `REDIS_URL`: Redis connection URL for caching (optional)
 - `API_HOST`: Host to bind the API server
 - `API_PORT`: Port to bind the API server
 - `ENVIRONMENT`: Application environment (development, production)

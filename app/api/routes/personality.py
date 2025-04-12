@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import asyncio
+import json
 
 from app.db.database import get_db
 from app.models.user import User
@@ -13,6 +15,15 @@ router = APIRouter(
     prefix="/personalities",
     tags=["personalities"]
 )
+
+# Common questions to preload for faster response times
+COMMON_QUESTIONS = [
+    "What do you think about this?",
+    "How would you solve this problem?",
+    "What's your opinion on this topic?",
+    "Do you agree with this approach?",
+    "Can you help me with this issue?"
+]
 
 @router.post("/users/{username}/generate", response_model=PersonalityProfileResponse)
 async def generate_personality_profile(username: str, db: Session = Depends(get_db)):
@@ -38,6 +49,11 @@ async def generate_personality_profile(username: str, db: Session = Depends(get_
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Could not generate profile. User needs at least 5 messages."
         )
+    
+    # Preload responses to common questions in the background
+    asyncio.create_task(personality_service.preload_common_questions(
+        user.id, COMMON_QUESTIONS, db
+    ))
     
     return profile
 
@@ -66,6 +82,11 @@ async def generate_personality_profile_by_email(email: str, db: Session = Depend
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Could not generate profile. User needs at least 5 messages."
         )
+    
+    # Preload responses to common questions in the background
+    asyncio.create_task(personality_service.preload_common_questions(
+        user.id, COMMON_QUESTIONS, db
+    ))
     
     return profile
 
@@ -137,12 +158,23 @@ def get_profile_by_id(profile_id: int, db: Session = Depends(get_db)):
     return profile
 
 @router.post("/users/{username}/ask", response_model=AnswerResponse)
-async def ask_question(username: str, question: QuestionRequest, db: Session = Depends(get_db)):
+async def ask_question(
+    username: str, 
+    question: QuestionRequest, 
+    stream: bool = False,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db)
+):
     """
     Ask a question to a user and get a response based on their personality profile.
     
     This endpoint uses the user's active personality profile to generate a response
     that matches their communication style and personality traits.
+    
+    Parameters:
+    - username: Username of the user to ask
+    - question: Question to ask the user
+    - stream: If true, return a streaming response (helpful for longer responses)
     """
     # Find the user
     user = db.query(User).filter(User.username == username).first()
@@ -164,7 +196,14 @@ async def ask_question(username: str, question: QuestionRequest, db: Session = D
             detail=f"User doesn't have an active personality profile. Generate one first."
         )
     
-    # Generate response
+    # If streaming is requested, use streaming response
+    if stream:
+        return StreamingResponse(
+            personality_service.generate_response_stream(user.id, question.question, db),
+            media_type="application/json"
+        )
+    
+    # Generate response (use cached response if available)
     answer = await personality_service.generate_response(user.id, question.question, db)
     
     if not answer:
@@ -173,6 +212,12 @@ async def ask_question(username: str, question: QuestionRequest, db: Session = D
             detail=f"Failed to generate response"
         )
     
+    # Preload more responses in the background after successful response
+    background_tasks.add_task(
+        personality_service.preload_related_questions,
+        user.id, question.question, answer, db
+    )
+    
     return AnswerResponse(
         question=question.question,
         answer=answer,
@@ -180,12 +225,23 @@ async def ask_question(username: str, question: QuestionRequest, db: Session = D
     )
 
 @router.post("/email/{email}/ask", response_model=AnswerResponse)
-async def ask_question_by_email(email: str, question: QuestionRequest, db: Session = Depends(get_db)):
+async def ask_question_by_email(
+    email: str, 
+    question: QuestionRequest, 
+    stream: bool = False,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db)
+):
     """
     Ask a question to a user identified by email and get a response based on their personality profile.
     
     This endpoint finds the user by their unique email address, then uses their active
     personality profile to generate a response that matches their communication style and personality traits.
+    
+    Parameters:
+    - email: Email of the user to ask
+    - question: Question to ask the user
+    - stream: If true, return a streaming response (helpful for longer responses)
     """
     # Find the user by email
     user = db.query(User).filter(User.email == email).first()
@@ -207,7 +263,14 @@ async def ask_question_by_email(email: str, question: QuestionRequest, db: Sessi
             detail=f"User doesn't have an active personality profile. Generate one first."
         )
     
-    # Generate response
+    # If streaming is requested, use streaming response
+    if stream:
+        return StreamingResponse(
+            personality_service.generate_response_stream(user.id, question.question, db),
+            media_type="application/json"
+        )
+    
+    # Generate response (use cached response if available)
     answer = await personality_service.generate_response(user.id, question.question, db)
     
     if not answer:
@@ -215,6 +278,12 @@ async def ask_question_by_email(email: str, question: QuestionRequest, db: Sessi
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate response"
         )
+    
+    # Preload more responses in the background after successful response
+    background_tasks.add_task(
+        personality_service.preload_related_questions, 
+        user.id, question.question, answer, db
+    )
     
     return AnswerResponse(
         question=question.question,

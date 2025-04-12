@@ -18,6 +18,9 @@ services:
       - db
       - ollama
       - vectorizer-worker
+      - redis
+    networks:
+      - app-network
 
   db:
     image: timescale/timescaledb-ha:pg17
@@ -54,9 +57,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+    restart: always
+    command: redis-server --save 60 1 --loglevel warning
 
 volumes:
   postgres_data:
     name: postgres_data_ai_social_app
   ollama_data:
     name: ollama_data_ai_social_app 
+  redis_data:
+    name: redis_data_ai_social_app
+
+networks:
+  app-network:
+    driver: bridge

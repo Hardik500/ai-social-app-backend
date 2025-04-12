@@ -7,6 +7,7 @@ from sqlalchemy import text
 import numpy as np
 import statistics
 from sqlalchemy import and_, or_
+from datetime import datetime
 
 from app.db.database import get_db
 from app.models.schemas import ConversationCreate, ConversationResponse
@@ -21,12 +22,12 @@ router = APIRouter(
 
 def is_potential_duplicate(db: Session, conversation_data: ConversationCreate, timestamp_tolerance: float = 5.0) -> Dict:
     """
-    Check if a conversation is potentially a duplicate by comparing source and timestamps.
+    Check if a conversation is a potential duplicate by comparing timestamps and source.
     
     Args:
         db: Database session
-        conversation_data: The conversation data to check
-        timestamp_tolerance: Time difference in seconds to consider timestamps as matching
+        conversation_data: The new conversation data to check
+        timestamp_tolerance: Time difference threshold in seconds
         
     Returns:
         Dict with 'is_duplicate' bool and 'existing_conversation' if a duplicate is found
@@ -34,8 +35,17 @@ def is_potential_duplicate(db: Session, conversation_data: ConversationCreate, t
     # Get the source
     source = conversation_data.source
     
-    # Extract timestamps from messages and convert to float
-    message_timestamps = [float(msg.timestamp.split('.')[0]) for msg in conversation_data.messages]
+    # Parse ISO timestamps and convert to UNIX timestamps
+    message_timestamps = []
+    for msg in conversation_data.messages:
+        try:
+            # Parse ISO format timestamp to datetime
+            dt = datetime.fromisoformat(msg.timestamp.replace('Z', '+00:00'))
+            # Convert to UNIX timestamp (seconds since epoch)
+            message_timestamps.append(dt.timestamp())
+        except ValueError:
+            # If timestamp can't be parsed, use current time
+            message_timestamps.append(datetime.now().timestamp())
     
     if not message_timestamps:
         return {"is_duplicate": False, "existing_conversation": None}
@@ -60,7 +70,19 @@ def is_potential_duplicate(db: Session, conversation_data: ConversationCreate, t
             continue
             
         # Extract timestamps from existing messages
-        existing_timestamps = [float(msg.timestamp.split('.')[0]) for msg in messages]
+        existing_timestamps = []
+        for msg in messages:
+            try:
+                # Parse ISO format timestamp to datetime
+                dt = datetime.fromisoformat(msg.timestamp.replace('Z', '+00:00'))
+                # Convert to UNIX timestamp
+                existing_timestamps.append(dt.timestamp())
+            except ValueError:
+                # If timestamp can't be parsed, skip this message
+                continue
+        
+        if not existing_timestamps:
+            continue
         
         # Check if the timestamps overlap
         existing_min = min(existing_timestamps)

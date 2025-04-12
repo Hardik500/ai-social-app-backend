@@ -4,6 +4,10 @@ from dotenv import load_dotenv
 import json
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+import asyncio
+from typing import List, Dict, Any, Optional
+import hashlib
+import redis
 
 load_dotenv()
 
@@ -11,32 +15,118 @@ class EmbeddingService:
     def __init__(self):
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.model = "nomic-embed-text"  # Default embedding model
+        
+        # Initialize embedding cache
+        self.embedding_cache = {}
+        self.cache_size = 200  # Store up to 200 embeddings in memory
+        
+        # Setup Redis connection if available
+        redis_url = os.getenv("REDIS_URL")
+        self.redis_client = None
+        self.cache_expiry = 86400  # Cache expiry in seconds (24 hours)
+        
+        if redis_url:
+            try:
+                self.redis_client = redis.from_url(redis_url)
+                print(f"Redis embedding cache initialized at {redis_url}")
+            except Exception as e:
+                print(f"Failed to connect to Redis for embeddings: {str(e)}")
+                self.redis_client = None
+        
+        # Semaphore to limit concurrent API calls
+        self.semaphore = asyncio.Semaphore(5)  # Allow up to 5 concurrent embedding calls
     
     async def generate_embedding(self, text: str) -> list[float]:
-        """Generate embeddings for the given text using Ollama API directly."""
-        url = f"{self.base_url}/api/embeddings"
+        """Generate embeddings for the given text using Ollama API directly with caching."""
+        # Generate cache key
+        cache_key = self._get_cache_key(text)
         
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    url,
-                    json={
-                        "model": self.model,
-                        "prompt": text
-                    },
-                    timeout=30.0
+        # Try to get from cache first
+        cached_embedding = await self._get_from_cache(cache_key)
+        if cached_embedding:
+            return cached_embedding
+            
+        # If not in cache, generate new embedding with rate limiting
+        async with self.semaphore:
+            url = f"{self.base_url}/api/embeddings"
+            
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        url,
+                        json={
+                            "model": self.model,
+                            "prompt": text
+                        },
+                        timeout=30.0
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        embedding = data["embedding"]
+                        
+                        # Cache the embedding
+                        await self._add_to_cache(cache_key, embedding)
+                        
+                        return embedding
+                    else:
+                        error_msg = f"Error generating embedding: {response.status_code} - {response.text}"
+                        print(error_msg)
+                        raise Exception(error_msg)
+            except Exception as e:
+                print(f"Exception when calling Ollama API: {str(e)}")
+                raise e
+    
+    async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for multiple texts in parallel."""
+        tasks = []
+        for text in texts:
+            tasks.append(self.generate_embedding(text))
+            
+        return await asyncio.gather(*tasks)
+    
+    def _get_cache_key(self, text: str) -> str:
+        """Generate a cache key for a text embedding."""
+        # Use a hash of the text as the key
+        return hashlib.md5(text.encode('utf-8')).hexdigest()
+    
+    async def _get_from_cache(self, cache_key: str) -> Optional[List[float]]:
+        """Try to get an embedding from cache (either Redis or in-memory)."""
+        # Try Redis first if available
+        if self.redis_client:
+            try:
+                cached = self.redis_client.get(f"embedding:{cache_key}")
+                if cached:
+                    return json.loads(cached.decode('utf-8'))
+            except Exception as e:
+                print(f"Redis embedding cache error: {str(e)}")
+        
+        # Fall back to in-memory cache
+        return self.embedding_cache.get(cache_key)
+    
+    async def _add_to_cache(self, cache_key: str, embedding: List[float]) -> None:
+        """Add an embedding to cache (both Redis and in-memory)."""
+        # Add to Redis if available
+        if self.redis_client:
+            try:
+                self.redis_client.setex(
+                    f"embedding:{cache_key}", 
+                    self.cache_expiry,
+                    json.dumps(embedding)
                 )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    return data["embedding"]
-                else:
-                    error_msg = f"Error generating embedding: {response.status_code} - {response.text}"
-                    print(error_msg)
-                    raise Exception(error_msg)
-        except Exception as e:
-            print(f"Exception when calling Ollama API: {str(e)}")
-            raise e
+            except Exception as e:
+                print(f"Redis embedding cache error: {str(e)}")
+        
+        # Add to in-memory cache
+        self.embedding_cache[cache_key] = embedding
+        
+        # Prune cache if it gets too large
+        if len(self.embedding_cache) > self.cache_size:
+            # Remove oldest entries
+            keys_to_remove = list(self.embedding_cache.keys())[:-self.cache_size]
+            for key in keys_to_remove:
+                if key in self.embedding_cache:
+                    del self.embedding_cache[key]
     
     def schedule_embedding_generation(self, db: Session, text: str, table: str, id_column: str, id_value: int, text_column: str, embedding_column: str):
         """
