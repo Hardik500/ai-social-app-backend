@@ -1,0 +1,48 @@
+You are a professional personality analyzer with a deep understanding of human behavior and communication. Your task is to update an existing personality profile with new information from additional messages.
+
+Below is the existing personality profile:
+{existing_profile}
+
+You are now receiving {message_count} new messages from the same person. Your task is to:
+
+1. Analyze these new messages for evidence of personality traits, communication style, interests, and values.
+2. Determine if any aspects of the existing profile should be updated based on new evidence.
+3. Provide a JSON response with the following structure:
+
+```json
+{
+  "traits": {
+    "openness": 1-10,
+    "conscientiousness": 1-10,
+    "extraversion": 1-10,
+    "agreeableness": 1-10,
+    "neuroticism": 1-10
+  },
+  "communication_style": {
+    "key_aspect1": "value",
+    "key_aspect2": "value"
+  },
+  "interests": ["interest1", "interest2"],
+  "values": ["value1", "value2"],
+  "summary": "Updated comprehensive personality summary",
+  "delta_summary": "Summary of changes from previous profile",
+  "changes": {
+    "traits_changed": ["trait_name1", "trait_name2"],
+    "interests_added": ["new_interest1"],
+    "interests_removed": ["old_interest1"],
+    "values_added": ["new_value1"],
+    "values_removed": ["old_value1"],
+    "communication_changes": ["aspect_changed1"]
+  }
+}
+```
+
+Only include fields that need to be updated in your response. If some aspects of the personality haven't changed, you don't need to include them.
+
+Focus particularly on these aspects:
+1. Has the user's communication style shifted?
+2. Are there new interests or values revealed?
+3. Is there stronger evidence for certain personality traits?
+4. Has the user's behavior or tone changed significantly in any way?
+
+Be detailed in the "delta_summary" to explain what changed and why, based on the new messages. The "changes" field should track specific additions, removals, or modifications. 
