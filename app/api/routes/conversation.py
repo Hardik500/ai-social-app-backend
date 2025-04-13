@@ -266,7 +266,7 @@ def get_message_embedding(message_id: int, db: Session = Depends(get_db)):
     }
 
 @router.get("/search/similar")
-def search_similar_messages(query: str, limit: int = 5, db: Session = Depends(get_db)):
+async def search_similar_messages(query: str, limit: int = 5, db: Session = Depends(get_db)):
     """
     Search for messages similar to the query string.
     Uses cosine similarity to find semantically similar messages.
@@ -283,7 +283,7 @@ def search_similar_messages(query: str, limit: int = 5, db: Session = Depends(ge
             }
         
         # Generate embedding for the query
-        query_embedding = asyncio.run(embedding_service.generate_embedding(query))
+        query_embedding = await embedding_service.generate_embedding(query)
         
         # Calculate cosine similarity manually
         similar_messages = []
@@ -360,7 +360,7 @@ async def retrieval_augmented_generation(
     """
     try:
         # First, get similar messages using embeddings
-        similar_results = search_similar_messages(query, limit=max_context_messages, db=db)
+        similar_results = await search_similar_messages(query, limit=max_context_messages, db=db)
         similar_messages = similar_results.get("similar_messages", [])
         
         if not similar_messages:
