@@ -4,12 +4,17 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import asyncio
 import json
+import os
+import httpx
+import numpy as np
 
 from app.db.database import get_db
 from app.models.user import User
 from app.models.personality import PersonalityProfile
 from app.models.schemas import PersonalityProfileResponse, QuestionRequest, AnswerResponse
 from app.services.personality_service import personality_service
+from app.services.embedding_service import embedding_service
+from app.models.conversation import Message
 
 router = APIRouter(
     prefix="/personalities",
@@ -289,4 +294,134 @@ async def ask_question_by_email(
         question=question.question,
         answer=answer,
         username=user.username  # Use username from the user object
-    ) 
+    )
+
+@router.post("/users/{username}/ask/rag")
+async def ask_personality_with_rag(
+    username: str, 
+    question: QuestionRequest,
+    max_context_messages: int = 5,
+    model: str = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Ask a question to a user's personality, enhanced with RAG for more accurate responses.
+    
+    This endpoint:
+    1. Finds relevant messages the user has actually sent (using vector similarity)
+    2. Combines those messages with the user's personality profile
+    3. Uses both to generate a more accurate, evidence-based response
+    
+    Parameters:
+    - username: The username to generate a response for
+    - question: The question to ask
+    - max_context_messages: Maximum number of similar messages to include
+    - model: Optional override for LLM model
+    """
+    # First, get the active personality profile
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User '{username}' not found"
+        )
+    
+    profile = db.query(PersonalityProfile).filter(
+        PersonalityProfile.user_id == user.id,
+        PersonalityProfile.is_active == True
+    ).first()
+    
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active personality profile found for user '{username}'"
+        )
+    
+    # Find semantically similar messages from this user
+    relevant_messages = []
+    try:
+        # Generate embedding for the question
+        question_embedding = await embedding_service.generate_embedding(question.question)
+        
+        # Find similar messages from this user using cosine similarity
+        messages = db.query(Message).filter(Message.user_id == user.id).all()
+        
+        if messages:
+            # Calculate similarity scores
+            similarity_scores = []
+            for msg in messages:
+                if msg.embedding is not None:
+                    # Calculate cosine similarity
+                    dot_product = np.dot(np.array(msg.embedding), np.array(question_embedding))
+                    norm_a = np.linalg.norm(np.array(msg.embedding))
+                    norm_b = np.linalg.norm(np.array(question_embedding))
+                    similarity = dot_product / (norm_a * norm_b)
+                    
+                    similarity_scores.append({
+                        "message": msg.content,
+                        "similarity": float(similarity)
+                    })
+            
+            # Sort by similarity (highest first) and take top results
+            similarity_scores.sort(key=lambda x: x["similarity"], reverse=True)
+            relevant_messages = similarity_scores[:max_context_messages]
+    except Exception as e:
+        print(f"Error finding similar messages: {str(e)}")
+        # Continue with no similar messages if there's an error
+    
+    # Prepare context from relevant messages
+    context_texts = []
+    for msg in relevant_messages:
+        context_texts.append(f"Previous message from {username}: \"{msg['message']}\" (Similarity: {msg['similarity']:.2f})")
+    
+    message_context = "\n\n".join(context_texts)
+    
+    # Use personality system prompt combined with relevant messages
+    system_prompt = profile.system_prompt
+    if message_context:
+        system_prompt += f"\n\nHere are some of {username}'s actual messages that might be relevant to the current question:\n\n{message_context}"
+    
+    # Generate response using Ollama API
+    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_model = model or os.getenv("OLLAMA_CHAT_MODEL", "llama3")
+    
+    chat_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": question.question}
+    ]
+    
+    # Call Ollama API
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{ollama_base_url}/api/chat",
+                json={
+                    "model": ollama_model,
+                    "messages": chat_messages,
+                    "stream": False
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                answer = data["message"]["content"]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error from Ollama API: {response.status_code} - {response.text}"
+                )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating response: {str(e)}"
+        )
+    
+    # Return the enhanced response with context information
+    return {
+        "question": question.question,
+        "answer": answer,
+        "username": username,
+        "used_messages": len(relevant_messages),
+        "relevant_context": [msg["message"] for msg in relevant_messages]
+    } 

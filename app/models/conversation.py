@@ -3,8 +3,12 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import ARRAY
 import pgvector.sqlalchemy
+import os
 
 from app.db.database import Base
+
+# Determine if we're running in a test environment
+IS_TESTING = "pytest" in os.environ.get("PYTHONPATH", "")
 
 class Conversation(Base):
     __tablename__ = "conversations"
@@ -29,7 +33,13 @@ class Message(Base):
     content = Column(Text)
     timestamp = Column(String(50))  # Original timestamp from the source
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    embedding = Column(pgvector.sqlalchemy.Vector(768))  # For embeddings (dimension is 768 for nomic-embed-text)
+    
+    # For embeddings (dimension is 768 for nomic-embed-text)
+    # Store as JSON array in SQLite for testing
+    if IS_TESTING:
+        embedding = Column(Text)  # For SQLite in tests
+    else:
+        embedding = Column(pgvector.sqlalchemy.Vector(768))
     
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")

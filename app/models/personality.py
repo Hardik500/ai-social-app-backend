@@ -2,8 +2,12 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import pgvector.sqlalchemy
+import os
 
 from app.db.database import Base
+
+# Determine if we're running in a test environment
+IS_TESTING = "pytest" in os.environ.get("PYTHONPATH", "")
 
 class PersonalityProfile(Base):
     __tablename__ = "personality_profiles"
@@ -20,7 +24,11 @@ class PersonalityProfile(Base):
     description = Column(Text)
     
     # Vector embedding of the personality description for similarity search
-    embedding = Column(pgvector.sqlalchemy.Vector(768))
+    # Store as Text in SQLite for testing
+    if IS_TESTING:
+        embedding = Column(Text)  # For SQLite in tests
+    else:
+        embedding = Column(pgvector.sqlalchemy.Vector(768))
     
     # Whether this is the active profile for the user (users can have multiple profiles)
     is_active = Column(Boolean, default=True)
