@@ -8,6 +8,8 @@ A backend application for a personality-based social app that allows uploading S
 - Store conversations with embeddings in PostgreSQL with TimescaleDB and pgAI
 - Associate conversations with specific users/personalities
 - Asynchronous embedding generation using pgAI's vectorizer-worker
+- Automatic embedding updates when content changes
+- Retrieval Augmented Generation (RAG) for answering questions from conversation data
 - Duplicate conversation detection to prevent data duplication
 - Caching system for fast response generation
 - Parallel processing for performance optimization
@@ -132,6 +134,39 @@ GET /conversations/messages/{message_id}/embedding
 GET /conversations/search/similar?query=Let's meet next week
 ```
 
+### Retrieval Augmented Generation (RAG)
+
+```
+POST /conversations/rag?query=What is the project deadline?&max_context_messages=3
+```
+
+The RAG endpoint combines semantic search with generative AI to provide contextually accurate answers:
+
+1. It retrieves the most semantically similar messages based on vector embeddings
+2. Uses these messages as context for the LLM to generate a response
+3. Returns both the generated answer and the context that was used
+
+Response example:
+
+```json
+{
+  "query": "What is the project deadline?",
+  "answer": "Based on the provided context, the project deadline is March 15th, 2023.",
+  "context_used": [
+    "Message from john_doe: We need to finish the project by March 15th, 2023. (Similarity: 0.89)",
+    "Message from project_manager: Don't forget about the deadline next month! (Similarity: 0.76)",
+    "Message from team_lead: The client expects all deliverables by mid-March. (Similarity: 0.71)"
+  ],
+  "model_used": "llama3"
+}
+```
+
+You can optionally specify a different model to use with the `model` parameter:
+
+```
+POST /conversations/rag?query=What is the roadmap?&model=gemma
+```
+
 ### Personality Profile Management
 
 #### Generate a Personality Profile
@@ -193,6 +228,44 @@ Response example:
 
 This endpoint uses the user's personality profile to generate a response that matches their communication style, interests, and personality traits.
 
+#### Enhanced Personality Response with RAG
+
+```
+POST /personalities/users/{username}/ask/rag
+```
+
+This version uses Retrieval Augmented Generation to provide more accurate and evidence-based personality responses. It finds actual messages the user has sent that are relevant to the question, then uses them to enhance the response.
+
+Request body is the same as the regular ask endpoint:
+
+```json
+{
+  "question": "What do you think about using React for this project?"
+}
+```
+
+But the response includes the relevant messages that were used as context:
+
+```json
+{
+  "question": "What do you think about using React for this project?",
+  "answer": "I think React would be a solid choice for the frontend. I have previously worked with React and found it quite efficient for component-based UIs. As I mentioned before, its ecosystem is mature and there's plenty of support available.",
+  "username": "Hardik",
+  "used_messages": 3,
+  "relevant_context": [
+    "I've been using React for several projects and it's working great for us",
+    "The React component model makes it easy to reuse UI elements across the application",
+    "I prefer frontend frameworks with good community support and documentation"
+  ]
+}
+```
+
+You can control the number of similar messages to include as context:
+
+```
+POST /personalities/users/{username}/ask/rag?max_context_messages=3
+```
+
 ##### Streaming Responses
 
 For improved user experience, you can request streaming responses by adding the `stream=true` query parameter:
@@ -238,6 +311,30 @@ pip install -e ".[test]"
 # Run the test suite
 pytest
 ```
+
+#### Test Coverage
+
+The test suite covers the following areas:
+
+1. **Core Functionality Tests**:
+   - Conversation upload and retrieval
+   - User creation and management
+   - Message embedding generation
+
+2. **Retrieval Augmented Generation (RAG) Tests**:
+   - Conversation RAG endpoint testing
+   - Content retrieval based on semantic similarity
+   - Edge cases and error handling
+
+3. **Personality RAG Tests**:
+   - Personality-enhanced RAG endpoint
+   - Integration of user messages with personality profiles
+   - Error handling and parameter customization
+
+4. **Auto-Updating Embedding Tests**:
+   - Embedding queue management
+   - Batch processing of embedding updates
+   - Database interaction and concurrency
 
 ### Sanity Check
 

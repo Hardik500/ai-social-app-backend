@@ -8,12 +8,14 @@ import numpy as np
 import statistics
 from sqlalchemy import and_, or_
 from datetime import datetime
+import os
+import httpx
 
 from app.db.database import get_db
 from app.models.schemas import ConversationCreate, ConversationResponse
 from app.models.user import User
 from app.models.conversation import Conversation, Message
-from app.services.embedding_service import embedding_service
+from app.services.embedding_service import embedding_service, embedding_auto_updater
 
 router = APIRouter(
     prefix="/conversations",
@@ -198,18 +200,26 @@ async def create_conversation(conversation_data: ConversationCreate, skip_duplic
             db.commit()
             db.refresh(msg_user)
         
-        # Generate embedding for message
-        embedding = await embedding_service.generate_embedding(msg_data.message)
-        
-        # Create message with embedding
+        # Create message - initially without embedding
         new_message = Message(
             conversation_id=new_conversation.id,
             user_id=msg_user.id,
             content=msg_data.message,
-            timestamp=msg_data.timestamp,
-            embedding=embedding
+            timestamp=msg_data.timestamp
         )
         db.add(new_message)
+        db.commit()
+        db.refresh(new_message)
+        
+        # Schedule embedding generation in the background
+        embedding_auto_updater.schedule_update(
+            db=db,
+            table="messages",
+            id_column="id",
+            id_value=new_message.id,
+            text_column="content",
+            embedding_column="embedding"
+        )
     
     db.commit()
     db.refresh(new_conversation)
@@ -310,4 +320,111 @@ def search_similar_messages(query: str, limit: int = 5, db: Session = Depends(ge
             "query": query,
             "error": str(e),
             "similar_messages": []
+        }
+
+@router.post("/rag")
+async def retrieval_augmented_generation(
+    query: str, 
+    max_context_messages: int = 5, 
+    model: str = None,
+    db: Session = Depends(get_db)
+):
+    """
+    RAG endpoint that retrieves relevant messages as context and uses an LLM to generate an answer.
+    
+    - Retrieves semantically similar messages based on vector similarity
+    - Uses these messages as context for the LLM to answer the query
+    - Returns both the answer and the relevant context that was used
+    
+    Parameters:
+    - query: The question to answer
+    - max_context_messages: Maximum number of messages to use as context (default: 5)
+    - model: Optional override for the LLM model to use
+    
+    Example:
+    ```
+    POST /conversations/rag?query=What is the project deadline?&max_context_messages=3
+    
+    Response:
+    {
+        "query": "What is the project deadline?",
+        "answer": "Based on the provided context, the project deadline is March 15th, 2023.",
+        "context_used": [
+            "Message from john_doe: We need to finish the project by March 15th, 2023. (Similarity: 0.89)",
+            "Message from project_manager: Don't forget about the deadline next month! (Similarity: 0.76)",
+            "Message from team_lead: The client expects all deliverables by mid-March. (Similarity: 0.71)"
+        ],
+        "model_used": "llama3"
+    }
+    ```
+    """
+    try:
+        # First, get similar messages using embeddings
+        similar_results = search_similar_messages(query, limit=max_context_messages, db=db)
+        similar_messages = similar_results.get("similar_messages", [])
+        
+        if not similar_messages:
+            return {
+                "query": query,
+                "answer": "I couldn't find any relevant information to answer this question.",
+                "context_used": [],
+                "error": "No similar messages found in the database"
+            }
+        
+        # Prepare context from similar messages
+        context_texts = []
+        for msg in similar_messages:
+            context_texts.append(f"Message from {msg['username']}: {msg['content']} (Similarity: {msg['similarity_score']:.2f})")
+        
+        context_text = "\n\n".join(context_texts)
+        
+        # Use Ollama API to generate answer
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_model = model or os.getenv("OLLAMA_CHAT_MODEL", "llama3")
+        
+        # Build the prompt with context
+        system_prompt = "You are a helpful assistant. Answer the question based ONLY on the provided context. If the context doesn't contain the answer, say you don't have enough information."
+        
+        chat_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Context information:\n\n{context_text}\n\nQuestion: {query}\n\nYour answer:"}
+        ]
+        
+        # Call Ollama API
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{ollama_base_url}/api/chat",
+                json={
+                    "model": ollama_model,
+                    "messages": chat_messages,
+                    "stream": False
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                answer = data["message"]["content"]
+            else:
+                return {
+                    "query": query,
+                    "answer": None,
+                    "context_used": context_texts,
+                    "error": f"Error from Ollama API: {response.status_code} - {response.text}"
+                }
+        
+        # Return both the answer and the context that was used
+        return {
+            "query": query,
+            "answer": answer,
+            "context_used": context_texts,
+            "model_used": ollama_model
+        }
+        
+    except Exception as e:
+        return {
+            "query": query,
+            "answer": None,
+            "error": str(e),
+            "context_used": []
         } 
