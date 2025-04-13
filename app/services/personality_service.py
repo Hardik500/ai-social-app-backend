@@ -11,6 +11,7 @@ import time
 import hashlib
 import redis
 from functools import lru_cache
+import re
 
 from app.models.user import User
 from app.models.conversation import Message
@@ -58,14 +59,41 @@ class PersonalityService:
         if not messages or message_count < 5:  # Require at least 5 messages for a good profile
             print(f"Insufficient messages for user {user.username}: {message_count} (Need at least 5)")
             return None
+        
+        # Check if there's an existing profile we can update incrementally
+        existing_profile = db.query(PersonalityProfile).filter(
+            PersonalityProfile.user_id == user_id, 
+            PersonalityProfile.is_active == True
+        ).first()
+        
+        if existing_profile and hasattr(existing_profile, 'last_message_id') and existing_profile.last_message_id:
+            # Attempt incremental update if there are new messages
+            try:
+                # Get only new messages since last profile update
+                new_messages = db.query(Message).filter(
+                    Message.user_id == user_id,
+                    Message.id > existing_profile.last_message_id
+                ).all()
+                
+                # If there are enough new messages, do an incremental update
+                if len(new_messages) >= 5:
+                    print(f"Performing incremental update with {len(new_messages)} new messages")
+                    return await self.update_profile_incrementally(
+                        user_id, existing_profile, new_messages, db
+                    )
+            except Exception as e:
+                print(f"Error during incremental update check: {str(e)}")
+                # Fall back to full profile generation
+                pass
             
         # If there are too many messages, sample a subset to avoid timeout issues
-        MAX_MESSAGES = 50  # Limit to prevent timeouts or context size issues
+        MAX_MESSAGES = 100  # Increased from 50 to handle more messages for initial profile
         
         if message_count > MAX_MESSAGES:
-            import random
-            print(f"Sampling {MAX_MESSAGES} messages from {message_count} total messages")
-            messages = random.sample(messages, MAX_MESSAGES)
+            # Use embedding-guided selection instead of random sampling
+            selected_messages = self._select_representative_messages(messages, MAX_MESSAGES, db)
+            print(f"Selected {len(selected_messages)} representative messages from {message_count} total messages")
+            messages = selected_messages
         
         # Concatenate messages into a single document
         message_texts = [msg.content for msg in messages]
@@ -138,7 +166,8 @@ class PersonalityService:
             embedding=embedding,
             message_count=message_count,
             system_prompt=system_prompt,
-            is_active=True
+            is_active=True,
+            last_message_id=max(msg.id for msg in messages) if messages else None
         )
         
         # Set any existing profiles to inactive
@@ -161,8 +190,41 @@ class PersonalityService:
         """Generate a personality analysis using the LLM."""
         url = f"{self.base_url}/api/chat"
         
+        # Process messages in smaller batches to reduce context size
+        max_messages_per_request = 50
+        
+        if len(messages) > max_messages_per_request:
+            print(f"Processing {len(messages)} messages in smaller batches of {max_messages_per_request}")
+            # Split into chunks of max_messages_per_request
+            message_chunks = [messages[i:i + max_messages_per_request] 
+                             for i in range(0, len(messages), max_messages_per_request)]
+            
+            # Process each chunk and collect results
+            chunk_results = []
+            for i, chunk in enumerate(message_chunks):
+                print(f"Processing chunk {i+1}/{len(message_chunks)} with {len(chunk)} messages")
+                result = await self._generate_chunk_analysis(chunk, system_prompt, is_chunk=True)
+                if result:
+                    chunk_results.append(result)
+                else:
+                    print(f"Failed to process chunk {i+1}")
+                    
+            if not chunk_results:
+                return None
+                
+            # Merge the chunk results
+            merged_result = self._merge_chunk_results(chunk_results)
+            return merged_result
+        
+        # For small message batches, process directly
+        return await self._generate_chunk_analysis(messages, system_prompt, is_chunk=False)
+    
+    async def _generate_chunk_analysis(self, messages: List[str], system_prompt: str, is_chunk: bool) -> Optional[Dict[str, Any]]:
+        """Generate analysis for a chunk of messages."""
+        url = f"{self.base_url}/api/chat"
+        
         # Process messages in parallel batches to speed up analysis
-        message_batches = self._create_message_batches(messages, 10)  # Process 10 messages per batch
+        message_batches = self._create_message_batches(messages, 5)  # Smaller batch size for faster processing
         processed_messages = []
         
         # Create tasks for parallel processing
@@ -182,9 +244,15 @@ class PersonalityService:
         print(f"Analyzing {len(messages)} messages with total length of {len(message_text)} characters")
         
         # Create chat prompt
+        user_prompt = f"Here are some message samples from a user:\n\n{message_text}\n\n"
+        if is_chunk:
+            user_prompt += "Create a partial personality profile based on these messages only."
+        else:
+            user_prompt += "Create a detailed personality profile."
+            
         chat_messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Here are some message samples from a user:\n\n{message_text}\n\nCreate a detailed personality profile."}
+            {"role": "user", "content": user_prompt}
         ]
         
         try:
@@ -197,7 +265,7 @@ class PersonalityService:
                         "stream": False,  # Request non-streaming response
                         "format": "json"  # Request JSON output format
                     },
-                    timeout=120.0  # Longer timeout for analysis (2 minutes)
+                    timeout=180.0  # Increased timeout for analysis (3 minutes)
                 )
                 
                 if response.status_code == 200:
@@ -215,9 +283,91 @@ class PersonalityService:
                             if content.endswith("```"):
                                 content = content[:-3]
                             
-                            parsed_content = json.loads(content.strip())
-                            return parsed_content
-                        except json.JSONDecodeError as e:
+                            # Clean up the content
+                            content = content.strip()
+                            
+                            try:
+                                # Try simple JSON parsing first
+                                parsed_content = json.loads(content)
+                                return parsed_content
+                            except json.JSONDecodeError as e:
+                                print(f"Initial JSON parsing failed: {str(e)}")
+                                print("Attempting to fix the JSON structure...")
+                                
+                                # Create a fallback structure
+                                fallback = {
+                                    "traits": {
+                                        "openness": 5,
+                                        "conscientiousness": 5,
+                                        "extraversion": 5,
+                                        "agreeableness": 5,
+                                        "neuroticism": 5
+                                    },
+                                    "communication_style": {"style": "neutral"},
+                                    "interests": [],
+                                    "values": [],
+                                    "summary": "Unable to generate complete profile due to processing error."
+                                }
+                                
+                                # Try to extract traits using string operations instead of regex
+                                try:
+                                    if '"traits"' in content:
+                                        traits_start = content.find('"traits"') + 8
+                                        traits_start = content.find('{', traits_start)
+                                        if traits_start > 0:
+                                            traits_end = content.find('}', traits_start) + 1
+                                            if traits_end > traits_start:
+                                                traits_json = content[traits_start:traits_end]
+                                                try:
+                                                    traits = json.loads(traits_json)
+                                                    for key, value in traits.items():
+                                                        if isinstance(value, (int, float)) and 1 <= value <= 10:
+                                                            fallback["traits"][key.lower()] = value
+                                                except:
+                                                    pass
+                                except Exception as ex:
+                                    print(f"Error extracting traits: {str(ex)}")
+                                
+                                # Try to extract interests
+                                try:
+                                    if '"interests"' in content:
+                                        interests_start = content.find('"interests"') + 11
+                                        interests_start = content.find('[', interests_start)
+                                        if interests_start > 0:
+                                            interests_end = content.find(']', interests_start) + 1
+                                            if interests_end > interests_start:
+                                                interests_json = content[interests_start:interests_end]
+                                                try:
+                                                    interests = json.loads(interests_json)
+                                                    if isinstance(interests, list):
+                                                        fallback["interests"] = [i for i in interests if isinstance(i, str)]
+                                                except:
+                                                    pass
+                                except Exception as ex:
+                                    print(f"Error extracting interests: {str(ex)}")
+                                
+                                # Try to extract values
+                                try:
+                                    if '"values"' in content:
+                                        values_start = content.find('"values"') + 8
+                                        values_start = content.find('[', values_start)
+                                        if values_start > 0:
+                                            values_end = content.find(']', values_start) + 1
+                                            if values_end > values_start:
+                                                values_json = content[values_start:values_end]
+                                                try:
+                                                    values = json.loads(values_json)
+                                                    if isinstance(values, list):
+                                                        fallback["values"] = [v for v in values if isinstance(v, str)]
+                                                except:
+                                                    pass
+                                except Exception as ex:
+                                    print(f"Error extracting values: {str(ex)}")
+                                    
+                                print("Using fallback structure with extracted data")
+                                return fallback
+                                
+                        except Exception as e:
                             print(f"Failed to parse JSON from response: {content}")
                             print(f"JSON Error: {str(e)}")
                             return None
@@ -233,10 +383,63 @@ class PersonalityService:
             import traceback
             print(f"Traceback: {traceback.format_exc()}")
             return None
-    
+            
     def _create_message_batches(self, messages: List[str], batch_size: int) -> List[List[str]]:
         """Split messages into batches for parallel processing."""
         return [messages[i:i + batch_size] for i in range(0, len(messages), batch_size)]
+    
+    def _select_representative_messages(self, messages: List[Message], max_count: int, db: Session) -> List[Message]:
+        """Select representative messages using embedding-based clustering and temporal weighting."""
+        # Always use time-weighted selection for now since k-means may not be available
+        return self._select_time_weighted_messages(messages, max_count)
+    
+    def _select_time_weighted_messages(self, messages: List[Message], max_count: int) -> List[Message]:
+        """Select messages with exponential time weighting to prioritize recent messages."""
+        import random
+        import math
+        from datetime import datetime
+        
+        now = datetime.utcnow().timestamp()
+        
+        # Apply exponential decay weighting based on message age
+        weighted_messages = []
+        for msg in messages:
+            msg_time = msg.created_at.timestamp()
+            time_diff_days = (now - msg_time) / (24 * 3600)  # Convert to days
+            weight = math.exp(-0.001 * time_diff_days)  # Exponential decay
+            weighted_messages.append((msg, weight))
+        
+        # Ensure we always include some of the most recent messages
+        recent_count = min(max_count // 4, len(messages))
+        recent_messages = sorted(messages, key=lambda m: m.created_at, reverse=True)[:recent_count]
+        recent_ids = {msg.id for msg in recent_messages}
+        
+        # Do weighted random sampling for the remaining slots
+        remaining_slots = max_count - recent_count
+        remaining_messages = [m for m in messages if m.id not in recent_ids]
+        
+        if not remaining_messages:
+            return recent_messages
+            
+        # Weighted random sampling
+        weights = [math.exp(-0.001 * (now - msg.created_at.timestamp()) / (24 * 3600)) 
+                   for msg in remaining_messages]
+        
+        # Normalize weights
+        total_weight = sum(weights)
+        normalized_weights = [w / total_weight for w in weights]
+        
+        # Perform weighted sampling
+        sampled_indices = random.choices(
+            range(len(remaining_messages)), 
+            weights=normalized_weights, 
+            k=min(remaining_slots, len(remaining_messages))
+        )
+        
+        # Combine recent and sampled messages
+        selected_messages = recent_messages + [remaining_messages[i] for i in sampled_indices]
+        
+        return selected_messages
         
     async def _process_message_batch(self, messages: List[str]) -> List[str]:
         """Process a batch of messages - this can include any preprocessing needed."""
@@ -376,23 +579,20 @@ class PersonalityService:
             asyncio.create_task(self.generate_response(user_id, question, db))
     
     async def _generate_related_questions(self, original_question: str, original_answer: str, system_prompt: str) -> List[str]:
-        """Generate follow-up questions related to the original question and answer."""
+        """Generate related follow-up questions."""
         url = f"{self.base_url}/api/chat"
         
-        # Create a prompt to generate related questions
-        related_questions_prompt = f"""
-        Based on this conversation:
-        User: {original_question}
-        You: {original_answer}
+        # Create prompt
+        user_prompt = f"""Based on the following question and answer, suggest 3 related follow-up questions that the user might want to ask next.
         
-        Generate 3 likely follow-up questions the user might ask next. 
-        Return the questions as a JSON array of strings. For example:
-        ["Follow-up question 1?", "Follow-up question 2?", "Follow-up question 3?"]
-        """
+Question: {original_question}
+Answer: {original_answer}
+
+Return only the questions as a JSON array of strings."""
         
         chat_messages = [
-            {"role": "system", "content": "You are a helpful assistant that generates likely follow-up questions."},
-            {"role": "user", "content": related_questions_prompt}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ]
         
         try:
@@ -405,11 +605,12 @@ class PersonalityService:
                         "stream": False,
                         "format": "json"
                     },
-                    timeout=15.0  # Shorter timeout for this task
+                    timeout=10.0
                 )
                 
                 if response.status_code == 200:
                     result = response.json()
+                    # Extract the content from the response
                     if "message" in result and "content" in result["message"]:
                         content = result["message"]["content"]
                         try:
@@ -417,7 +618,7 @@ class PersonalityService:
                             content = content.strip()
                             if content.startswith("```json"):
                                 content = content[7:]
-                            if content.startswith("```"):
+                            elif content.startswith("```"):
                                 content = content[3:]
                             if content.endswith("```"):
                                 content = content[:-3]
@@ -543,5 +744,328 @@ class PersonalityService:
                 "error": str(e),
                 "done": True
             }) + "\n"
+
+    async def update_profile_incrementally(
+        self, user_id: int, existing_profile: PersonalityProfile, 
+        new_messages: List[Message], db: Session
+    ) -> PersonalityProfile:
+        """Update an existing personality profile incrementally with new messages."""
+        MAX_DELTA_MESSAGES = 50  # Maximum number of new messages to process at once
+        
+        # If too many new messages, select representative ones
+        if len(new_messages) > MAX_DELTA_MESSAGES:
+            selected_messages = self._select_representative_messages(new_messages, MAX_DELTA_MESSAGES, db)
+            print(f"Selected {len(selected_messages)} representative new messages from {len(new_messages)} total new")
+            new_messages = selected_messages
+            
+        # Get the message texts
+        message_texts = [msg.content for msg in new_messages]
+        
+        # Get existing traits from profile
+        existing_traits = existing_profile.traits
+        
+        # Get the incremental update system prompt
+        system_prompt = prompt_manager.get_template("personality_incremental_update")
+        
+        # Format the system prompt with existing traits
+        formatted_prompt = system_prompt.format(
+            existing_profile=json.dumps(existing_traits, indent=2),
+            message_count=len(new_messages)
+        )
+        
+        # Generate delta analysis from LLM
+        traits_delta = await self._generate_analysis(message_texts, formatted_prompt)
+        
+        if traits_delta is None:
+            print(f"Failed to generate incremental analysis, falling back to full profile generation")
+            # Make existing profile inactive
+            existing_profile.is_active = False
+            db.commit()
+            # Generate full profile
+            return await self.generate_profile(user_id, db)
+            
+        # Merge the existing traits with delta updates
+        updated_traits = self._merge_traits(existing_traits, traits_delta)
+        
+        # Get the latest message ID for future incremental updates
+        latest_message_id = max(msg.id for msg in new_messages) if new_messages else existing_profile.last_message_id
+        
+        # Update the total message count
+        total_message_count = existing_profile.message_count + len(new_messages)
+        
+        # Extract updated components
+        summary = updated_traits.get("summary", "")
+        traits = updated_traits.get("traits", {})
+        communication_style = updated_traits.get("communication_style", {})
+        interests = updated_traits.get("interests", [])
+        values = updated_traits.get("values", [])
+        
+        # Format the description using the template
+        description = prompt_manager.format_template(
+            "description_template",
+            summary=summary,
+            openness=traits.get('openness', 'N/A'),
+            conscientiousness=traits.get('conscientiousness', 'N/A'),
+            extraversion=traits.get('extraversion', 'N/A'),
+            agreeableness=traits.get('agreeableness', 'N/A'),
+            neuroticism=traits.get('neuroticism', 'N/A'),
+            communication_style=communication_style if isinstance(communication_style, str) else 
+                                ', '.join([f'{k}: {v}' for k, v in communication_style.items()]) 
+                                if isinstance(communication_style, dict) else communication_style,
+            interests=interests if isinstance(interests, str) else 
+                      ', '.join(interests) if isinstance(interests, list) else interests,
+            values=values if isinstance(values, str) else 
+                   ', '.join(values) if isinstance(values, list) else values
+        )
+        
+        # Format the system prompt for simulation
+        system_prompt = prompt_manager.format_template(
+            "personality_simulation",
+            username=db.query(User).filter(User.id == user_id).first().username,
+            openness=traits.get('openness', 5),
+            conscientiousness=traits.get('conscientiousness', 5),
+            extraversion=traits.get('extraversion', 5),
+            agreeableness=traits.get('agreeableness', 5),
+            neuroticism=traits.get('neuroticism', 5),
+            communication_style=communication_style if isinstance(communication_style, str) else 
+                                ', '.join([f'{k}: {v}' for k, v in communication_style.items()]) 
+                                if isinstance(communication_style, dict) else communication_style,
+            interests=interests if isinstance(interests, str) else 
+                      ', '.join(interests) if isinstance(interests, list) else interests,
+            values=values if isinstance(values, str) else 
+                   ', '.join(values) if isinstance(values, list) else values,
+            summary=summary
+        )
+        
+        # Generate embedding for description
+        embedding = await embedding_service.generate_embedding(description)
+        
+        # Create a change log entry
+        change_log = {
+            "timestamp": time.time(),
+            "new_message_count": len(new_messages),
+            "total_message_count": total_message_count,
+            "changes": traits_delta.get("changes", {})
+        }
+        
+        # Add the change log to the existing profile if it exists, otherwise create it
+        if hasattr(existing_profile, 'change_log') and existing_profile.change_log:
+            if isinstance(existing_profile.change_log, str):
+                try:
+                    existing_change_log = json.loads(existing_profile.change_log)
+                except:
+                    existing_change_log = []
+            else:
+                existing_change_log = existing_profile.change_log
+            
+            if not isinstance(existing_change_log, list):
+                existing_change_log = [existing_change_log]
+                
+            existing_change_log.append(change_log)
+            change_log_json = json.dumps(existing_change_log)
+        else:
+            change_log_json = json.dumps([change_log])
+            
+        # Get delta embedding if available
+        delta_embedding = None
+        try:
+            delta_text = traits_delta.get("delta_summary", "")
+            if delta_text:
+                delta_embedding = await embedding_service.generate_embedding(delta_text)
+        except:
+            delta_embedding = None
+            
+        # Update existing profile
+        existing_profile.traits = updated_traits
+        existing_profile.description = description
+        existing_profile.embedding = embedding
+        existing_profile.message_count = total_message_count
+        existing_profile.system_prompt = system_prompt
+        existing_profile.last_message_id = latest_message_id
+        
+        # Add delta embedding and change log if supported
+        if hasattr(existing_profile, 'delta_embeddings') and delta_embedding:
+            # Append to existing delta embeddings if they exist
+            if existing_profile.delta_embeddings:
+                if isinstance(existing_profile.delta_embeddings, str):
+                    try:
+                        existing_delta_embeddings = json.loads(existing_profile.delta_embeddings)
+                    except:
+                        existing_delta_embeddings = []
+                else:
+                    existing_delta_embeddings = existing_profile.delta_embeddings
+                
+                if not isinstance(existing_delta_embeddings, list):
+                    existing_delta_embeddings = [existing_delta_embeddings] 
+                
+                existing_delta_embeddings.append(delta_embedding)
+                existing_profile.delta_embeddings = existing_delta_embeddings
+            else:
+                existing_profile.delta_embeddings = [delta_embedding]
+        
+        if hasattr(existing_profile, 'change_log'):
+            existing_profile.change_log = change_log_json
+            
+        # Save changes
+        db.commit()
+        db.refresh(existing_profile)
+        
+        return existing_profile
+        
+    def _merge_traits(self, existing_traits: Dict[str, Any], delta_traits: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge existing traits with delta updates."""
+        # Deep copy to avoid modifying the original
+        updated_traits = json.loads(json.dumps(existing_traits))
+        
+        # Update main personality traits (OCEAN)
+        if "traits" in delta_traits and "traits" in updated_traits:
+            for trait, value in delta_traits["traits"].items():
+                updated_traits["traits"][trait] = value
+                
+        # Update communication style
+        if "communication_style" in delta_traits:
+            if isinstance(delta_traits["communication_style"], dict) and isinstance(updated_traits.get("communication_style", {}), dict):
+                for key, value in delta_traits["communication_style"].items():
+                    updated_traits.setdefault("communication_style", {})[key] = value
+            else:
+                updated_traits["communication_style"] = delta_traits["communication_style"]
+                
+        # Update interests (might be a list or a string)
+        if "interests" in delta_traits:
+            if isinstance(delta_traits["interests"], list) and isinstance(updated_traits.get("interests", []), list):
+                # Combine lists and remove duplicates while preserving order
+                seen = set()
+                combined = []
+                for item in delta_traits["interests"] + updated_traits.get("interests", []):
+                    if item.lower() not in seen:
+                        combined.append(item)
+                        seen.add(item.lower())
+                updated_traits["interests"] = combined[:15]  # Limit to top 15
+            else:
+                updated_traits["interests"] = delta_traits["interests"]
+                
+        # Update values (might be a list or a string)
+        if "values" in delta_traits:
+            if isinstance(delta_traits["values"], list) and isinstance(updated_traits.get("values", []), list):
+                # Combine lists and remove duplicates while preserving order
+                seen = set()
+                combined = []
+                for item in delta_traits["values"] + updated_traits.get("values", []):
+                    if item.lower() not in seen:
+                        combined.append(item)
+                        seen.add(item.lower())
+                updated_traits["values"] = combined[:10]  # Limit to top 10
+            else:
+                updated_traits["values"] = delta_traits["values"]
+                
+        # Update summary
+        if "summary" in delta_traits:
+            updated_traits["summary"] = delta_traits["summary"]
+            
+        return updated_traits
+
+    def _merge_chunk_results(self, chunk_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Merge multiple chunk results into a single coherent personality profile."""
+        if not chunk_results:
+            return {}
+            
+        # Use the first chunk as a base
+        merged = json.loads(json.dumps(chunk_results[0]))
+        
+        # Count trait values to compute average
+        trait_counts = {}
+        trait_mappings = {
+            'openness': ['openness', 'openness_to_experience'],
+            'conscientiousness': ['conscientiousness'],
+            'extraversion': ['extraversion', 'extroversion'],
+            'agreeableness': ['agreeableness'],
+            'neuroticism': ['neuroticism']
+        }
+        
+        # Initialize trait counts
+        for canonical_name in trait_mappings.keys():
+            trait_counts[canonical_name] = []
+            
+        # Collect all interests and values
+        all_interests = set()
+        all_values = set()
+        communication_aspects = {}
+        
+        # Process all chunks
+        for chunk in chunk_results:
+            # Collect traits
+            if "traits" in chunk:
+                for trait_name, value in chunk["traits"].items():
+                    if isinstance(value, (int, float)) and 1 <= value <= 10:
+                        # Map variant trait names to canonical names
+                        canonical_name = None
+                        for canon, variants in trait_mappings.items():
+                            if trait_name.lower() in variants or trait_name.lower() == canon:
+                                canonical_name = canon
+                                break
+                        
+                        if canonical_name:
+                            trait_counts[canonical_name].append(value)
+            
+            # Collect interests - FIX: Check for string type before adding to set
+            if "interests" in chunk and isinstance(chunk["interests"], list):
+                for interest in chunk["interests"]:
+                    if isinstance(interest, str):  # Only add if it's a string
+                        all_interests.add(interest)
+                    elif isinstance(interest, dict) and "name" in interest:
+                        # Handle case where interest is a dict with a name field
+                        all_interests.add(interest["name"])
+            
+            # Collect values - FIX: Check for string type before adding to set
+            if "values" in chunk and isinstance(chunk["values"], list):
+                for value in chunk["values"]:
+                    if isinstance(value, str):  # Only add if it's a string
+                        all_values.add(value)
+                    elif isinstance(value, dict) and "name" in value:
+                        # Handle case where value is a dict with a name field
+                        all_values.add(value["name"])
+                    
+            # Collect communication style aspects
+            if "communication_style" in chunk and isinstance(chunk["communication_style"], dict):
+                for aspect, value in chunk["communication_style"].items():
+                    if aspect not in communication_aspects:
+                        communication_aspects[aspect] = []
+                    communication_aspects[aspect].append(value)
+        
+        # Average out the traits
+        if "traits" not in merged:
+            merged["traits"] = {}
+        
+        for trait_name, values in trait_counts.items():
+            if values:
+                merged["traits"][trait_name] = round(sum(values) / len(values))
+                
+        # Combine interests and values
+        merged["interests"] = list(all_interests)[:15]  # Limit to top 15
+        merged["values"] = list(all_values)[:10]  # Limit to top 10
+        
+        # Merge communication style
+        if "communication_style" not in merged:
+            merged["communication_style"] = {}
+            
+        for aspect, values in communication_aspects.items():
+            if isinstance(values[0], (int, float)):
+                # For numeric values, take average
+                merged["communication_style"][aspect] = sum(values) / len(values)
+            else:
+                # For text values, take most common
+                from collections import Counter
+                counter = Counter(values)
+                merged["communication_style"][aspect] = counter.most_common(1)[0][0]
+        
+        # Create a combined summary
+        if "summary" not in merged:
+            merged["summary"] = ""
+            
+        summaries = [chunk.get("summary", "") for chunk in chunk_results if "summary" in chunk]
+        if summaries:
+            merged["summary"] = "This individual " + " ".join(summaries)
+            
+        return merged
 
 personality_service = PersonalityService() 

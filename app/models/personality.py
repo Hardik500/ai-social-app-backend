@@ -40,4 +40,17 @@ class PersonalityProfile(Base):
     message_count = Column(Integer, default=0)
     
     # System prompt to use for personality simulation
-    system_prompt = Column(Text) 
+    system_prompt = Column(Text)
+    
+    # Last processed message ID for incremental updates
+    last_message_id = Column(Integer, nullable=True)
+    
+    # Change log for tracking personality changes over time
+    change_log = Column(JSON, nullable=True)
+    
+    # Delta embeddings for incremental changes
+    if IS_TESTING:
+        delta_embeddings = Column(Text, nullable=True)  # For SQLite in tests
+    else:
+        delta_embeddings = Column(JSON, nullable=True)  # Store as JSON array of embeddings
+    
