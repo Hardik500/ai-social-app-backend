@@ -87,7 +87,7 @@ class PersonalityService:
                 pass
             
         # If there are too many messages, sample a subset to avoid timeout issues
-        MAX_MESSAGES = 100  # Increased from 50 to handle more messages for initial profile
+        MAX_MESSAGES = 1000  # Increased from 50 to handle more messages for initial profile
         
         if message_count > MAX_MESSAGES:
             # Use embedding-guided selection instead of random sampling
