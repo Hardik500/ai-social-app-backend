@@ -369,17 +369,14 @@ async def ask_personality_with_rag(
         print(f"Error finding similar messages: {str(e)}")
         # Continue with no similar messages if there's an error
     
-    # Prepare context from relevant messages
-    context_texts = []
-    for msg in relevant_messages:
-        context_texts.append(f"Previous message from {username}: \"{msg['message']}\" (Similarity: {msg['similarity']:.2f})")
-    
-    message_context = "\n\n".join(context_texts)
-    
-    # Use personality system prompt combined with relevant messages
-    system_prompt = profile.system_prompt
-    if message_context:
-        system_prompt += f"\n\nHere are some of {username}'s actual messages that might be relevant to the current question:\n\n{message_context}"
+    # Use the personality service to build an enhanced system prompt
+    system_prompt = await personality_service.build_rag_enhanced_system_prompt(
+        user_id=user.id,
+        username=username,
+        relevant_messages=relevant_messages,
+        question=question.question,
+        db=db
+    )
     
     # Generate response using Ollama API
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")

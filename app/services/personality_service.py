@@ -95,6 +95,9 @@ class PersonalityService:
             print(f"Selected {len(selected_messages)} representative messages from {message_count} total messages")
             messages = selected_messages
         
+        # Extract example messages for the simulation prompt
+        example_messages = self._extract_example_messages(messages)
+        
         # Concatenate messages into a single document
         message_texts = [msg.content for msg in messages]
         
@@ -149,7 +152,15 @@ class PersonalityService:
                       ', '.join(interests) if isinstance(interests, list) else interests,
             values=values if isinstance(values, str) else 
                    ', '.join(values) if isinstance(values, list) else values,
-            summary=summary
+            summary=summary,
+            # Use extracted examples if available, otherwise use defaults
+            example_question_1=example_messages.get("question1", "How are you today?"),
+            example_response_1=example_messages.get("response1", "I'm doing well, thanks for asking!"),
+            example_question_2=example_messages.get("question2", "What do you think about this project?"),
+            example_response_2=example_messages.get("response2", "I think it's interesting and has a lot of potential."),
+            topic="general conversation",
+            participants=f"{user.username} and others",
+            mood="neutral"
         )
         
         # Generate embedding for description in a background task
@@ -473,8 +484,11 @@ class PersonalityService:
         # Create chat prompt
         url = f"{self.base_url}/api/chat"
         
+        # Enhance the system prompt with question-specific context
+        system_prompt = self._enhance_system_prompt_for_question(profile.system_prompt, user.username, question)
+        
         chat_messages = [
-            {"role": "system", "content": profile.system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": question}
         ]
         
@@ -507,6 +521,72 @@ class PersonalityService:
             print(f"Exception when calling Ollama API: {str(e)}")
             return None
             
+    def _enhance_system_prompt_for_question(self, system_prompt: str, username: str, question: str) -> str:
+        """
+        Enhance the system prompt with question-specific context.
+        This adapts the existing system prompt to the current conversation.
+        """
+        # Detect question category/topic
+        topic = "general conversation"
+        mood = "neutral"
+        
+        # Simple heuristics to determine topic and mood
+        question_lower = question.lower()
+        
+        # Detect topics
+        if any(word in question_lower for word in ["work", "job", "career", "project", "task"]):
+            topic = "work-related discussion"
+        elif any(word in question_lower for word in ["personal", "family", "friend", "life", "relationship"]):
+            topic = "personal conversation"
+        elif any(word in question_lower for word in ["advice", "suggest", "recommend", "help"]):
+            topic = "advice seeking"
+        elif any(word in question_lower for word in ["opinion", "think", "feel", "believe"]):
+            topic = "opinion sharing"
+        elif any(word in question_lower for word in ["explain", "what is", "how does", "why"]):
+            topic = "explanation request"
+            
+        # Detect mood
+        if any(word in question_lower for word in ["urgent", "emergency", "critical", "asap", "quickly"]):
+            mood = "urgent"
+        elif any(word in question_lower for word in ["sad", "sorry", "upset", "disappointed"]):
+            mood = "empathetic"
+        elif any(word in question_lower for word in ["excited", "happy", "great", "awesome"]):
+            mood = "enthusiastic"
+        elif any(word in question_lower for word in ["confused", "don't understand", "unclear"]):
+            mood = "clarifying"
+            
+        # Update the context in the system prompt
+        updated_prompt = system_prompt
+        
+        try:
+            # Try to update topic, participants and mood if they exist in the prompt
+            if "Current conversation context:" in system_prompt:
+                # Update topic if present
+                topic_pattern = r"- Topic: .*"
+                if re.search(topic_pattern, system_prompt):
+                    updated_prompt = re.sub(topic_pattern, f"- Topic: {topic}", updated_prompt)
+                
+                # Update participants if present
+                participants_pattern = r"- Participants: .*"
+                if re.search(participants_pattern, system_prompt):
+                    updated_prompt = re.sub(participants_pattern, f"- Participants: {username} and the person asking", updated_prompt)
+                
+                # Update mood if present
+                mood_pattern = r"- Mood: .*"
+                if re.search(mood_pattern, system_prompt):
+                    updated_prompt = re.sub(mood_pattern, f"- Mood: {mood}", updated_prompt)
+            
+            # Add a reminder about the current question
+            if not updated_prompt.endswith("\n"):
+                updated_prompt += "\n"
+            updated_prompt += f"\nCurrent question context: You are now responding to a question about '{topic}' with a '{mood}' tone."
+        except Exception as e:
+            # If anything fails, just use the original prompt
+            print(f"Error enhancing system prompt: {str(e)}")
+            return system_prompt
+            
+        return updated_prompt
+        
     def _get_cache_key(self, user_id: int, question: str) -> str:
         """Generate a cache key based on user_id and question."""
         # Create a unique cache key using md5 hash of user_id and question
@@ -582,16 +662,29 @@ class PersonalityService:
         """Generate related follow-up questions."""
         url = f"{self.base_url}/api/chat"
         
+        # Create a specialized system prompt for generating follow-up questions
+        followup_system_prompt = "You are a helpful assistant tasked with generating natural follow-up questions. " + \
+                               "Based on the conversation, suggest questions that would naturally continue the discussion " + \
+                               "in a way that's consistent with the personality profile. Focus on questions that are " + \
+                               "relevant to the previous exchange and would elicit informative or interesting responses."
+        
         # Create prompt
         user_prompt = f"""Based on the following question and answer, suggest 3 related follow-up questions that the user might want to ask next.
         
 Question: {original_question}
 Answer: {original_answer}
 
-Return only the questions as a JSON array of strings."""
+The answer was generated based on this personality profile:
+{system_prompt[:500]}...
+
+Return only the questions as a JSON array of strings. Make sure the questions are:
+1. Relevant to the conversation context
+2. Consistent with the natural flow of the conversation
+3. Likely to elicit an informative response
+4. Varied in their focus to explore different aspects of the topic"""
         
         chat_messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": followup_system_prompt},
             {"role": "user", "content": user_prompt}
         ]
         
@@ -683,8 +776,11 @@ Return only the questions as a JSON array of strings."""
         # Create chat prompt
         url = f"{self.base_url}/api/chat"
         
+        # Enhance the system prompt with question-specific context
+        system_prompt = self._enhance_system_prompt_for_question(profile.system_prompt, user.username, question)
+        
         chat_messages = [
-            {"role": "system", "content": profile.system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": question}
         ]
         
@@ -761,6 +857,9 @@ Return only the questions as a JSON array of strings."""
         # Get the message texts
         message_texts = [msg.content for msg in new_messages]
         
+        # Extract some example messages for the simulation prompt
+        example_messages = self._extract_example_messages(new_messages)
+        
         # Get existing traits from profile
         existing_traits = existing_profile.traits
         
@@ -818,10 +917,13 @@ Return only the questions as a JSON array of strings."""
                    ', '.join(values) if isinstance(values, list) else values
         )
         
+        # Get the username for this user_id
+        username = db.query(User).filter(User.id == user_id).first().username
+        
         # Format the system prompt for simulation
         system_prompt = prompt_manager.format_template(
             "personality_simulation",
-            username=db.query(User).filter(User.id == user_id).first().username,
+            username=username,
             openness=traits.get('openness', 5),
             conscientiousness=traits.get('conscientiousness', 5),
             extraversion=traits.get('extraversion', 5),
@@ -834,7 +936,15 @@ Return only the questions as a JSON array of strings."""
                       ', '.join(interests) if isinstance(interests, list) else interests,
             values=values if isinstance(values, str) else 
                    ', '.join(values) if isinstance(values, list) else values,
-            summary=summary
+            summary=summary,
+            # Use extracted examples if available, otherwise use defaults
+            example_question_1=example_messages.get("question1", "How are you today?"),
+            example_response_1=example_messages.get("response1", "I'm doing well, thanks for asking!"),
+            example_question_2=example_messages.get("question2", "What do you think about this project?"),
+            example_response_2=example_messages.get("response2", "I think it's interesting and has a lot of potential."),
+            topic="general conversation",
+            participants=f"{username} and others",
+            mood="neutral"
         )
         
         # Generate embedding for description
@@ -1067,5 +1177,152 @@ Return only the questions as a JSON array of strings."""
             merged["summary"] = "This individual " + " ".join(summaries)
             
         return merged
+
+    def _extract_example_messages(self, messages: List[Message]) -> Dict[str, str]:
+        """Extract example messages from recent messages for use in the personality simulation prompt."""
+        example_messages = {}
+        
+        # Default examples in case we don't have enough messages
+        example_messages = {
+            "question1": "How are you today?",
+            "response1": "I'm doing well, thanks for asking!",
+            "question2": "What do you think about this project?",
+            "response2": "I think it's interesting and has a lot of potential."
+        }
+        
+        # Sort messages by creation time (newest first)
+        recent_messages = sorted(messages, key=lambda m: m.created_at, reverse=True)
+        
+        # Need at least 2 messages to create examples
+        if len(recent_messages) >= 2:
+            # Use the most recent message as the first example
+            example_messages["response1"] = recent_messages[0].content
+            # Generate a plausible question that could have prompted this response
+            example_messages["question1"] = self._generate_plausible_question(recent_messages[0].content)
+            
+            # Use the second most recent message as the second example
+            example_messages["response2"] = recent_messages[1].content
+            # Generate a plausible question for the second example
+            example_messages["question2"] = self._generate_plausible_question(recent_messages[1].content)
+            
+        return example_messages
+        
+    def _generate_plausible_question(self, message_content: str) -> str:
+        """Generate a plausible question that could have prompted the given message."""
+        # Simple heuristics to generate a question
+        
+        # If the message starts with a greeting, the question was probably "How are you?"
+        greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]
+        if any(message_content.lower().startswith(greeting) for greeting in greetings):
+            return "How are you doing today?"
+            
+        # If the message contains "thanks" or "thank you", the question was probably asking for help
+        if "thanks" in message_content.lower() or "thank you" in message_content.lower():
+            return "Could you help me with this issue?"
+            
+        # If the message is explaining something, the question was probably asking about it
+        if "because" in message_content.lower() or "since" in message_content.lower():
+            return "Can you explain why this is happening?"
+            
+        # If the message contains an opinion, the question was probably asking for one
+        opinion_words = ["think", "believe", "opinion", "feel", "view"]
+        if any(word in message_content.lower() for word in opinion_words):
+            return "What do you think about this?"
+            
+        # Default question for other cases
+        return "What's your perspective on this situation?"
+
+    async def build_rag_enhanced_system_prompt(
+        self, user_id: int, username: str, relevant_messages: List[Dict], question: str, db: Session
+    ) -> str:
+        """
+        Build a system prompt enhanced with retrieved context messages using the personality simulation template.
+        
+        Args:
+            user_id: The user's ID
+            username: The user's username
+            relevant_messages: List of relevant messages with similarity scores
+            question: The current question being asked
+            db: Database session
+            
+        Returns:
+            A formatted system prompt with personality details and relevant context
+        """
+        # Get the user's active personality profile
+        profile = db.query(PersonalityProfile).filter(
+            PersonalityProfile.user_id == user_id,
+            PersonalityProfile.is_active == True
+        ).first()
+        
+        if not profile or not profile.traits:
+            # Fallback to a generic prompt if no profile exists
+            return f"You are roleplaying as {username}. Answer the following question as if you were this person."
+        
+        # Extract profile components
+        traits = profile.traits.get("traits", {})
+        communication_style = profile.traits.get("communication_style", {})
+        interests = profile.traits.get("interests", [])
+        values = profile.traits.get("values", [])
+        summary = profile.traits.get("summary", "")
+        
+        # Extract example messages from the relevant messages
+        example_messages = {}
+        
+        # Default examples in case we don't have enough messages
+        example_messages = {
+            "question1": "How are you today?",
+            "response1": "I'm doing well, thanks for asking!",
+            "question2": "What do you think about this project?",
+            "response2": "I think it's interesting and has a lot of potential."
+        }
+        
+        # Try to use relevant messages as examples if available
+        if relevant_messages and len(relevant_messages) >= 2:
+            # Use the most relevant message as the first example
+            example_messages["response1"] = relevant_messages[0]["message"]
+            # Generate a plausible question that could have prompted this response
+            example_messages["question1"] = self._generate_plausible_question(relevant_messages[0]["message"])
+            
+            # Use the second most relevant message as the second example
+            example_messages["response2"] = relevant_messages[1]["message"]
+            # Generate a plausible question for the second example
+            example_messages["question2"] = self._generate_plausible_question(relevant_messages[1]["message"])
+        
+        # Format the system prompt for simulation using the template
+        system_prompt = prompt_manager.format_template(
+            "personality_simulation",
+            username=username,
+            openness=traits.get('openness', 5),
+            conscientiousness=traits.get('conscientiousness', 5),
+            extraversion=traits.get('extraversion', 5),
+            agreeableness=traits.get('agreeableness', 5),
+            neuroticism=traits.get('neuroticism', 5),
+            communication_style=communication_style if isinstance(communication_style, str) else 
+                                ', '.join([f'{k}: {v}' for k, v in communication_style.items()]) 
+                                if isinstance(communication_style, dict) else communication_style,
+            interests=interests if isinstance(interests, str) else 
+                      ', '.join(interests) if isinstance(interests, list) else interests,
+            values=values if isinstance(values, str) else 
+                   ', '.join(values) if isinstance(values, list) else values,
+            summary=summary,
+            example_question_1=example_messages["question1"],
+            example_response_1=example_messages["response1"],
+            example_question_2=example_messages["question2"],
+            example_response_2=example_messages["response2"],
+            topic=f"answering '{question}'",
+            participants=f"{username} and the person asking the question",
+            mood="helpful"
+        )
+        
+        # Append relevant message context if available
+        if relevant_messages:
+            context_texts = []
+            for i, msg in enumerate(relevant_messages):
+                context_texts.append(f"Message {i+1}: \"{msg['message']}\" (Similarity: {msg['similarity']:.2f})")
+            
+            message_context = "\n".join(context_texts)
+            system_prompt += f"\n\nFor additional context, here are some of your past messages that seem relevant to the current question:\n\n{message_context}\n\nUse these messages to inform your response in a natural way."
+        
+        return system_prompt
 
 personality_service = PersonalityService() 
