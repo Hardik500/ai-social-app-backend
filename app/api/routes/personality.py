@@ -11,7 +11,7 @@ import numpy as np
 from app.db.database import get_db
 from app.models.user import User
 from app.models.personality import PersonalityProfile
-from app.models.schemas import PersonalityProfileResponse, QuestionRequest, AnswerResponse
+from app.models.schemas import PersonalityProfileResponse, QuestionRequest, AnswerResponse, UserResponse
 from app.services.personality_service import personality_service
 from app.services.embedding_service import embedding_service
 from app.models.conversation import Message
@@ -421,4 +421,41 @@ async def ask_personality_with_rag(
         "username": username,
         "used_messages": len(relevant_messages),
         "relevant_context": [msg["message"] for msg in relevant_messages]
-    } 
+    }
+
+@router.get("/active-users", response_model=List[UserResponse])
+def get_active_users(db: Session = Depends(get_db)):
+    """
+    Get all users who have active personality profiles.
+    
+    This endpoint returns a list of users who have at least one active
+    personality profile that can be used for chat interactions.
+    
+    If no users with active profiles are found, it falls back to returning all users.
+    """
+    # First try to get users with active personality profiles
+    users_with_profiles = db.query(User).join(
+        PersonalityProfile, 
+        User.id == PersonalityProfile.user_id
+    ).filter(
+        PersonalityProfile.is_active == True
+    ).distinct().all()
+    
+    # If we found users with active profiles, return them
+    if users_with_profiles:
+        return users_with_profiles
+    
+    # Otherwise, return all users as a fallback
+    return db.query(User).all()
+
+@router.get("/all-users", response_model=List[UserResponse])
+def get_all_users(db: Session = Depends(get_db)):
+    """
+    Get all users regardless of personality profile status.
+    """
+    users = db.query(User).all()
+    
+    if not users:
+        return []
+    
+    return users 
