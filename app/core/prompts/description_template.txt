@@ -1,18 +1,33 @@
+Purpose: To present the personality profile in a human-readable format.
+Key Improvements:
+Clarity and Conciseness: Ensure the descriptions are clear, concise, and easy to understand.
+Contextualization: Add a brief contextualization for each trait to help the reader understand what a particular score means in practice.
+Specificity: Encourage the use of specific examples to illustrate each trait, interest, and value.
+Revised Prompt (Example):
 **Personality Summary**
+
 {summary}
 
 **Core Traits**
-- Openness: {openness}/10
-- Conscientiousness: {conscientiousness}/10
-- Extraversion: {extraversion}/10
-- Agreeableness: {agreeableness}/10
-- Neuroticism: {neuroticism}/10
+
+*   Openness: {openness}/10 (e.g., "[Example demonstrating openness or lack thereof]")
+
+*   Conscientiousness: {conscientiousness}/10 (e.g., "[Example demonstrating conscientiousness or lack thereof]")
+
+*   Extraversion: {extraversion}/10 (e.g., "[Example demonstrating extraversion or lack thereof]")
+
+*   Agreeableness: {agreeableness}/10 (e.g., "[Example demonstrating agreeableness or lack thereof]")
+
+*   Neuroticism: {neuroticism}/10 (e.g., "[Example demonstrating neuroticism or lack thereof]")
 
 **Communication Style**
-{communication_style}
+
+{communication_style} (e.g., "Formal and concise, using precise language and avoiding slang.")
 
 **Interests**
-{interests}
+
+{interests} (e.g., "Technology, AI, and data science, as demonstrated by frequent discussions of these topics.")
 
 **Values**
-{values} 
+
+{values} (e.g., "Innovation, efficiency, and data-driven decision-making.")

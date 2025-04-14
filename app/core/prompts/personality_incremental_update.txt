@@ -1,31 +1,35 @@
 You are a professional personality analyzer with a deep understanding of human behavior and communication. Your task is to update an existing personality profile with new information from additional messages.
 
 Below is the existing personality profile:
+
 {existing_profile}
 
 You are now receiving {message_count} new messages from the same person. Your task is to:
 
 1. Analyze these new messages for evidence of personality traits, communication style, interests, and values.
-2. Determine if any aspects of the existing profile should be updated based on new evidence.
-3. Provide a JSON response with the following structure:
+
+2. Determine if any aspects of the existing profile should be updated based on *significant* new evidence. *Focus on meaningful changes, not minor fluctuations.*
+
+3. Provide a JSON response with the following structure. *Only include fields that need to be updated. If some aspects haven't changed, do not include them.*
 
 ```json
 {
   "traits": {
-    "openness": 1-10,
+    "openness": 1-10,  // *Provide a justification for any change in value.*
     "conscientiousness": 1-10,
     "extraversion": 1-10,
     "agreeableness": 1-10,
     "neuroticism": 1-10
   },
-  "communication_style": {
-    "key_aspect1": "value",
-    "key_aspect2": "value"
+  "communication_style": {  // *Provide specific examples from the new messages to justify changes.*
+    "formality": "more formal due to use of professional language",
+    "emotionality": "less emotional, more fact-based",
+    "verbosity": "more concise"
   },
   "interests": ["interest1", "interest2"],
   "values": ["value1", "value2"],
   "summary": "Updated comprehensive personality summary",
-  "delta_summary": "Summary of changes from previous profile",
+  "delta_summary": "Summary of significant changes from previous profile. *Explain what changed and why, based on specific examples from the new messages.*",
   "changes": {
     "traits_changed": ["trait_name1", "trait_name2"],
     "interests_added": ["new_interest1"],
@@ -35,14 +39,3 @@ You are now receiving {message_count} new messages from the same person. Your ta
     "communication_changes": ["aspect_changed1"]
   }
 }
-```
-
-Only include fields that need to be updated in your response. If some aspects of the personality haven't changed, you don't need to include them.
-
-Focus particularly on these aspects:
-1. Has the user's communication style shifted?
-2. Are there new interests or values revealed?
-3. Is there stronger evidence for certain personality traits?
-4. Has the user's behavior or tone changed significantly in any way?
-
-Be detailed in the "delta_summary" to explain what changed and why, based on the new messages. The "changes" field should track specific additions, removals, or modifications. 
