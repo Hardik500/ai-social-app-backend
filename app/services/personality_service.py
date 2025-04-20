@@ -458,7 +458,7 @@ class PersonalityService:
         return messages
             
     async def generate_response(self, user_id: int, question: str, db: Session) -> Optional[str]:
-        """Generate a response to a question based on a user's personality profile."""
+        """Generate a response to a question based on a user's personality profile and recent conversation history."""
         # Try to get from cache first
         cache_key = self._get_cache_key(user_id, question)
         cached_response = self._get_from_cache(cache_key)
@@ -480,12 +480,32 @@ class PersonalityService:
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             return None
+
+        # Get recent conversations (last 50 messages)
+        recent_messages = (
+            db.query(Message)
+            .filter(Message.user_id == user_id)
+            .order_by(Message.created_at.desc())
+            .limit(50)
+            .all()
+        )
+
+        # Format conversation history
+        conversation_history = ""
+        if recent_messages:
+            conversation_history = "\nRecent conversation history:\n"
+            for msg in reversed(recent_messages):  # Show in chronological order
+                conversation_history += f"- {msg.content}\n"
             
         # Create chat prompt
         url = f"{self.base_url}/api/chat"
         
-        # Enhance the system prompt with question-specific context
-        system_prompt = self._enhance_system_prompt_for_question(profile.system_prompt, user.username, question)
+        # Enhance the system prompt with question-specific context and conversation history
+        system_prompt = self._enhance_system_prompt_for_question(
+            profile.system_prompt + conversation_history, 
+            user.username, 
+            question
+        )
         
         chat_messages = [
             {"role": "system", "content": system_prompt},
@@ -734,7 +754,7 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             
     async def generate_response_stream(self, user_id: int, question: str, db: Session):
         """
-        Generate a streaming response to a question based on a user's personality profile.
+        Generate a streaming response to a question based on a user's personality profile and recent conversation history.
         This allows the client to start displaying the response as it's being generated.
         """
         # Check cache first for immediate response
@@ -772,12 +792,32 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
                 "done": True
             }) + "\n"
             return
+
+        # Get recent conversations (last 50 messages)
+        recent_messages = (
+            db.query(Message)
+            .filter(Message.user_id == user_id)
+            .order_by(Message.created_at.desc())
+            .limit(50)
+            .all()
+        )
+
+        # Format conversation history
+        conversation_history = ""
+        if recent_messages:
+            conversation_history = "\nRecent conversation history:\n"
+            for msg in reversed(recent_messages):  # Show in chronological order
+                conversation_history += f"- {msg.content}\n"
             
         # Create chat prompt
         url = f"{self.base_url}/api/chat"
         
-        # Enhance the system prompt with question-specific context
-        system_prompt = self._enhance_system_prompt_for_question(profile.system_prompt, user.username, question)
+        # Enhance the system prompt with question-specific context and conversation history
+        system_prompt = self._enhance_system_prompt_for_question(
+            profile.system_prompt + conversation_history, 
+            user.username, 
+            question
+        )
         
         chat_messages = [
             {"role": "system", "content": system_prompt},
