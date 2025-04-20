@@ -458,7 +458,7 @@ class PersonalityService:
         return messages
             
     async def generate_response(self, user_id: int, question: str, db: Session) -> Optional[str]:
-        """Generate a response to a question based on a user's personality profile and recent conversation history."""
+        """Generate a response to a question based on a user's personality profile, conversation history, and user information."""
         # Try to get from cache first
         cache_key = self._get_cache_key(user_id, question)
         cached_response = self._get_from_cache(cache_key)
@@ -476,7 +476,7 @@ class PersonalityService:
         if not profile:
             return None
             
-        # Get the user for their username
+        # Get the user for their username and other information
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             return None
@@ -490,19 +490,33 @@ class PersonalityService:
             .all()
         )
 
+        # Format user information and conversation history
+        user_context = f"\nUser Information:\n"
+        user_context += f"- Username: {user.username}\n"
+        if hasattr(user, 'email') and user.email:
+            user_context += f"- Email: {user.email}\n"
+        if hasattr(user, 'full_name') and user.full_name:
+            user_context += f"- Full Name: {user.full_name}\n"
+        if hasattr(user, 'created_at') and user.created_at:
+            user_context += f"- Member since: {user.created_at.strftime('%Y-%m-%d')}\n"
+        if hasattr(profile, 'message_count') and profile.message_count:
+            user_context += f"- Total messages: {profile.message_count}\n"
+
         # Format conversation history
         conversation_history = ""
         if recent_messages:
             conversation_history = "\nRecent conversation history:\n"
             for msg in reversed(recent_messages):  # Show in chronological order
-                conversation_history += f"- {msg.content}\n"
+                # Add timestamp if available
+                timestamp = f" ({msg.created_at.strftime('%Y-%m-%d %H:%M')})" if hasattr(msg, 'created_at') and msg.created_at else ""
+                conversation_history += f"- {msg.content}{timestamp}\n"
             
         # Create chat prompt
         url = f"{self.base_url}/api/chat"
         
-        # Enhance the system prompt with question-specific context and conversation history
+        # Enhance the system prompt with user info, question-specific context and conversation history
         system_prompt = self._enhance_system_prompt_for_question(
-            profile.system_prompt + conversation_history, 
+            profile.system_prompt + user_context + conversation_history, 
             user.username, 
             question
         )
