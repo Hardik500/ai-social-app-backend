@@ -459,6 +459,8 @@ class PersonalityService:
             
     async def generate_response(self, user_id: int, question: str, db: Session) -> Optional[str]:
         """Generate a response to a question based on a user's personality profile, conversation history, and user information."""
+        print(f"Generating response for user {user_id} and question: {question[:30]}...")
+        
         # Try to get from cache first
         cache_key = self._get_cache_key(user_id, question)
         cached_response = self._get_from_cache(cache_key)
@@ -474,12 +476,16 @@ class PersonalityService:
         ).first()
         
         if not profile:
+            print(f"No active profile found for user {user_id}")
             return None
             
         # Get the user for their username and other information
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
+            print(f"No user found with ID {user_id}")
             return None
+
+        print(f"Found user {user.username} with active profile")
 
         # Get recent conversations (last 50 messages)
         recent_messages = (
@@ -489,6 +495,7 @@ class PersonalityService:
             .limit(50)
             .all()
         )
+        print(f"Retrieved {len(recent_messages)} recent messages for context")
 
         # Format user information and conversation history
         user_context = f"\nUser Information:\n"
@@ -526,6 +533,7 @@ class PersonalityService:
             {"role": "user", "content": question}
         ]
         
+        print(f"Calling Ollama API for user {user.username} with model {self.model}")
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -543,16 +551,18 @@ class PersonalityService:
                     # Extract the content from the response
                     if "message" in result and "content" in result["message"]:
                         response_content = result["message"]["content"]
+                        print(f"Successfully generated response for user {user.username}")
                         # Cache the response
                         self._add_to_cache(cache_key, response_content)
                         return response_content
+                    print(f"Invalid response format from Ollama API for user {user.username}")
                     return None
                 else:
                     error_msg = f"Error generating response: {response.status_code} - {response.text}"
                     print(error_msg)
                     return None
         except Exception as e:
-            print(f"Exception when calling Ollama API: {str(e)}")
+            print(f"Exception when calling Ollama API for user {user.username}: {str(e)}")
             return None
             
     def _enhance_system_prompt_for_question(self, system_prompt: str, username: str, question: str) -> str:

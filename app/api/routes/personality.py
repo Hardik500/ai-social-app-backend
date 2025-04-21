@@ -228,7 +228,6 @@ async def ask_question(
         answer=answer,
         username=username
     )
-
 @router.post("/email/{email}/ask", response_model=AnswerResponse)
 async def ask_question_by_email(
     email: str, 
@@ -248,13 +247,18 @@ async def ask_question_by_email(
     - question: Question to ask the user
     - stream: If true, return a streaming response (helpful for longer responses)
     """
+    print(f"Processing question request for email: {email}")
+    
     # Find the user by email
     user = db.query(User).filter(User.email == email).first()
     if not user:
+        print(f"User not found with email: {email}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with email '{email}' not found"
         )
+    
+    print(f"Found user: {user.username} (ID: {user.id})")
     
     # Check if user has an active profile
     profile = db.query(PersonalityProfile).filter(
@@ -263,28 +267,37 @@ async def ask_question_by_email(
     ).first()
     
     if not profile:
+        print(f"No active profile found for user {user.username}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"User doesn't have an active personality profile. Generate one first."
         )
     
+    print(f"Found active profile for user {user.username}")
+    
     # If streaming is requested, use streaming response
     if stream:
+        print(f"Streaming response requested for user {user.username}")
         return StreamingResponse(
             personality_service.generate_response_stream(user.id, question.question, db),
             media_type="application/json"
         )
     
     # Generate response (use cached response if available)
+    print(f"Generating response for question: {question.question[:50]}...")
     answer = await personality_service.generate_response(user.id, question.question, db)
     
     if not answer:
+        print(f"Failed to generate response for user {user.username}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate response"
         )
     
+    print(f"Successfully generated response for user {user.username}")
+    
     # Preload more responses in the background after successful response
+    print(f"Adding background task to preload related questions for user {user.username}")
     background_tasks.add_task(
         personality_service.preload_related_questions, 
         user.id, question.question, answer, db
