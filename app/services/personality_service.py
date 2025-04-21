@@ -543,7 +543,7 @@ class PersonalityService:
                         "messages": chat_messages,
                         "stream": False  # Request non-streaming response
                     },
-                    timeout=30.0
+                    timeout=120.0  # Increase timeout to 2 minutes
                 )
                 
                 if response.status_code == 200:
