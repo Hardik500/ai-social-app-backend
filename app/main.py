@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
-from app.api.routes import conversation, personality
+from app.api.routes import conversation, personality, ingestion
 from app.db.database import Base, engine, get_db
 
 # Load environment variables
@@ -32,6 +32,7 @@ app.add_middleware(
 # Include routers
 app.include_router(conversation.router)
 app.include_router(personality.router)
+app.include_router(ingestion.router)
 
 @app.get("/")
 def read_root():

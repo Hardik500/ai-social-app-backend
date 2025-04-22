@@ -528,6 +528,8 @@ class PersonalityService:
             question
         )
         
+        print(f"System prompt: {system_prompt}")
+        
         chat_messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": question}

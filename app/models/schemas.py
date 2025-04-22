@@ -83,4 +83,25 @@ class QuestionRequest(BaseModel):
 class AnswerResponse(BaseModel):
     question: str
     answer: str
-    username: str 
+    username: str
+
+class UserInfoSchema(BaseModel):
+    """Schema for user information."""
+    username: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    description: Optional[str] = None
+
+class AdditionalUserSchema(BaseModel):
+    """Schema for additional user information."""
+    username: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    description: Optional[str] = None
+
+class IngestionResultSchema(BaseModel):
+    """Schema for ingestion results."""
+    status: str
+    conversation_id: Optional[int] = None
+    messages_imported: Optional[int] = None
+    message: Optional[str] = None 

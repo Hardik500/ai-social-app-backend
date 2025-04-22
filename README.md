@@ -57,6 +57,97 @@ The API will be available at http://localhost:8000
 
 ## API Usage
 
+### Data Ingestion
+
+The application supports ingesting data from multiple sources to create conversations:
+
+#### Upload Source Data
+
+```
+POST /ingestion/
+```
+
+This endpoint accepts multipart/form-data with the following fields:
+- `source_type`: Type of the source (e.g., "slack_har", "whatsapp")
+- `source_file`: File containing the source data (e.g., HAR file for Slack)
+- `primary_user_info`: JSON string with primary user information
+- `additional_users`: Optional JSON string with additional users information
+- `user_mapping`: Optional JSON string with mapping from source user IDs to usernames
+
+Example primary_user_info:
+```json
+{
+  "username": "Hardik",
+  "email": "hkhandelwal@example.com",
+  "phone": "+919680023483",
+  "description": "Sr. Software Engineer"
+}
+```
+
+Example additional_users:
+```json
+[
+  {
+    "username": "Murali",
+    "email": "murali.v@example.com",
+    "phone": "+971543406899",
+    "description": "Head of Engineering, Clari Copilot"
+  }
+]
+```
+
+Example user_mapping (for Slack):
+```json
+{
+  "U055WM6DTJL": "Hardik",
+  "U03HPSXQXHC": "Murali"
+}
+```
+
+The `user_mapping` parameter is especially important for Slack HAR files, as it maps the cryptic Slack user IDs (like "U055WM6DTJL") to human-readable usernames (like "Hardik"). Without this mapping, the system will create users with usernames like "unknown_U055WM6DTJL".
+
+The endpoint extracts messages from the source file and stores them in the database, associating them with the specified users.
+
+#### Test Ingestion (JSON Data)
+
+```
+POST /ingestion/test
+```
+
+This endpoint is for testing and accepts JSON data directly instead of file upload:
+
+```json
+{
+  "source_type": "slack_har",
+  "source_data": { /* HAR file data as JSON */ },
+  "primary_user_info": {
+    "username": "Hardik",
+    "email": "hkhandelwal@example.com",
+    "phone": "+919680023483",
+    "description": "Sr. Software Engineer"
+  },
+  "additional_users": [
+    {
+      "username": "Murali",
+      "email": "murali.v@example.com",
+      "phone": "+971543406899",
+      "description": "Head of Engineering, Clari Copilot"
+    }
+  ],
+  "user_mapping": {
+    "U055WM6DTJL": "Hardik",
+    "U03HPSXQXHC": "Murali"
+  }
+}
+```
+
+### Supported Data Sources
+
+Currently, the application supports the following data sources:
+
+1. **Slack HAR Files**: HTTP Archive (HAR) files exported from Slack web interface
+2. **WhatsApp**: (*Coming soon*) - Export files from WhatsApp
+
 ### Upload a Conversation
 
 ```
