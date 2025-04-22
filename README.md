@@ -504,4 +504,29 @@ The system uses text prompt templates to generate personality profiles and simul
 - `personality_simulation.txt`: Template for simulating user responses based on their personality profile
 - `description_template.txt`: Template for formatting the human-readable personality description
 
-To modify how the AI interprets personalities or how it simulates user responses, you can edit these text files without changing any code. 
+To modify how the AI interprets personalities or how it simulates user responses, you can edit these text files without changing any code.
+
+## API Improvements
+
+### Background Tasks
+
+The API now processes intensive operations like personality profile generation in the background to prevent blocking concurrent requests. When you request profile generation, the API:
+
+1. Immediately returns a response indicating the task has started
+2. Continues processing in the background
+3. Allows you to check the status through the `/personalities/users/{username}/profile-status` endpoint
+
+Example workflow:
+
+```
+# Request profile generation
+POST /personalities/users/john_doe/generate
+
+# Check status of generation
+GET /personalities/users/john_doe/profile-status
+
+# Once complete, retrieve the full profile
+GET /personalities/users/john_doe?active_only=true
+```
+
+This allows the API to remain responsive even when handling computationally intensive tasks. 

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import asyncio
 import json
 import os
@@ -30,13 +30,19 @@ COMMON_QUESTIONS = [
     "Can you help me with this issue?"
 ]
 
-@router.post("/users/{username}/generate", response_model=PersonalityProfileResponse)
-async def generate_personality_profile(username: str, db: Session = Depends(get_db)):
+@router.post("/users/{username}/generate", response_model=Dict[str, Any])
+async def generate_personality_profile(
+    username: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
     """
     Generate a personality profile for a user based on their message history.
     
     This endpoint analyzes a user's messages to create a detailed personality profile
     that can be used to simulate their communication style and responses.
+    
+    The profile generation happens in the background to prevent blocking the API.
     """
     # Find the user
     user = db.query(User).filter(User.username == username).first()
@@ -46,30 +52,43 @@ async def generate_personality_profile(username: str, db: Session = Depends(get_
             detail=f"User with username '{username}' not found"
         )
     
-    # Generate profile
-    profile = await personality_service.generate_profile(user.id, db)
-    
-    if not profile:
+    # Verify the user has enough messages to generate a profile
+    message_count = db.query(Message).filter(Message.user_id == user.id).count()
+    if message_count < 5:  # Require at least 5 messages for a good profile
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Could not generate profile. User needs at least 5 messages."
         )
     
-    # Preload responses to common questions in the background
-    asyncio.create_task(personality_service.preload_common_questions(
-        user.id, COMMON_QUESTIONS, db
-    ))
+    # Start background task for profile generation
+    background_tasks.add_task(
+        personality_service.generate_profile,
+        user.id,
+        db
+    )
     
-    return profile
+    # Return immediate response while generation happens in background
+    return {
+        "status": "processing",
+        "message": f"Profile generation for {username} has started. Check back in a few moments.",
+        "user_id": user.id,
+        "username": username
+    }
 
-@router.post("/email/{email}/generate", response_model=PersonalityProfileResponse)
-async def generate_personality_profile_by_email(email: str, db: Session = Depends(get_db)):
+@router.post("/email/{email}/generate", response_model=Dict[str, Any])
+async def generate_personality_profile_by_email(
+    email: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
     """
     Generate a personality profile for a user based on their email and message history.
     
     This endpoint uses email as a unique identifier to find the user, then analyzes
     their messages to create a detailed personality profile that can be used to
     simulate their communication style and responses.
+    
+    The profile generation happens in the background to prevent blocking the API.
     """
     # Find the user by email
     user = db.query(User).filter(User.email == email).first()
@@ -79,21 +98,28 @@ async def generate_personality_profile_by_email(email: str, db: Session = Depend
             detail=f"User with email '{email}' not found"
         )
     
-    # Generate profile
-    profile = await personality_service.generate_profile(user.id, db)
-    
-    if not profile:
+    # Verify the user has enough messages to generate a profile
+    message_count = db.query(Message).filter(Message.user_id == user.id).count()
+    if message_count < 5:  # Require at least 5 messages for a good profile
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Could not generate profile. User needs at least 5 messages."
         )
     
-    # Preload responses to common questions in the background
-    asyncio.create_task(personality_service.preload_common_questions(
-        user.id, COMMON_QUESTIONS, db
-    ))
+    # Start background task for profile generation
+    background_tasks.add_task(
+        personality_service.generate_profile,
+        user.id,
+        db
+    )
     
-    return profile
+    # Return immediate response while generation happens in background
+    return {
+        "status": "processing",
+        "message": f"Profile generation for {user.username} (email: {email}) has started. Check back in a few moments.",
+        "user_id": user.id,
+        "username": user.username
+    }
 
 @router.get("/users/{username}", response_model=List[PersonalityProfileResponse])
 def get_user_personality_profiles(username: str, active_only: bool = False, db: Session = Depends(get_db)):
@@ -315,6 +341,7 @@ async def ask_personality_with_rag(
     question: QuestionRequest,
     max_context_messages: int = 5,
     model: str = None,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db)
 ):
     """
@@ -427,6 +454,12 @@ async def ask_personality_with_rag(
             detail=f"Error generating response: {str(e)}"
         )
     
+    # Preload more responses in the background after successful response
+    background_tasks.add_task(
+        personality_service.preload_related_questions,
+        user.id, question.question, answer, db
+    )
+    
     # Return the enhanced response with context information
     return {
         "question": question.question,
@@ -471,4 +504,84 @@ def get_all_users(db: Session = Depends(get_db)):
     if not users:
         return []
     
-    return users 
+    return users
+
+@router.get("/users/{username}/profile-status", response_model=Dict[str, Any])
+async def check_profile_generation_status(username: str, db: Session = Depends(get_db)):
+    """
+    Check the status of a user's personality profile generation.
+    
+    Returns information about whether a profile is currently being generated,
+    or if one already exists.
+    """
+    # Find the user
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with username '{username}' not found"
+        )
+    
+    # Check if there's an active profile
+    profile = db.query(PersonalityProfile).filter(
+        PersonalityProfile.user_id == user.id,
+        PersonalityProfile.is_active == True
+    ).first()
+    
+    if profile:
+        return {
+            "status": "completed",
+            "message": "Profile generation is complete.",
+            "profile_id": profile.id,
+            "created_at": profile.created_at.isoformat() if hasattr(profile, 'created_at') else None,
+            "user_id": user.id,
+            "username": username
+        }
+    
+    # No active profile found
+    return {
+        "status": "pending",
+        "message": "No active profile found. If you requested profile generation, it may still be processing.",
+        "user_id": user.id,
+        "username": username
+    }
+
+@router.get("/email/{email}/profile-status", response_model=Dict[str, Any])
+async def check_profile_generation_status_by_email(email: str, db: Session = Depends(get_db)):
+    """
+    Check the status of a user's personality profile generation by email.
+    
+    Returns information about whether a profile is currently being generated,
+    or if one already exists.
+    """
+    # Find the user by email
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with email '{email}' not found"
+        )
+    
+    # Check if there's an active profile
+    profile = db.query(PersonalityProfile).filter(
+        PersonalityProfile.user_id == user.id,
+        PersonalityProfile.is_active == True
+    ).first()
+    
+    if profile:
+        return {
+            "status": "completed",
+            "message": "Profile generation is complete.",
+            "profile_id": profile.id,
+            "created_at": profile.created_at.isoformat() if hasattr(profile, 'created_at') else None,
+            "user_id": user.id,
+            "username": user.username
+        }
+    
+    # No active profile found
+    return {
+        "status": "pending",
+        "message": "No active profile found. If you requested profile generation, it may still be processing.",
+        "user_id": user.id,
+        "username": user.username
+    } 
