@@ -296,7 +296,8 @@ async def search_similar_messages(query: str, limit: int = 5, db: Session = Depe
             return dot_product / (norm_a * norm_b)
         
         for message, username in messages:
-            # Calculate similarity
+            if message.embedding is None or len(message.embedding) == 0:
+                continue
             similarity = cosine_similarity(np.array(message.embedding), np.array(query_embedding))
             
             similar_messages.append({

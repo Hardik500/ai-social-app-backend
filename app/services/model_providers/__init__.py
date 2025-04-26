@@ -1,0 +1,1 @@
+# Model providers package for chat and embedding models (ollama, gemini, etc.) 

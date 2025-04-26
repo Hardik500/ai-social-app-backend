@@ -4,25 +4,5 @@ setup(
     name="ai-social-app-backend",
     version="0.1.0",
     packages=find_packages(),
-    install_requires=[
-        "fastapi==0.104.1",
-        "uvicorn==0.23.2",
-        "pydantic==2.4.2",
-        "sqlalchemy==2.0.22",
-        "psycopg2-binary==2.9.9",
-        "python-dotenv==1.0.0",
-        "httpx==0.25.0",
-        "pgvector==0.2.3",
-        "python-multipart==0.0.6",
-        "pydantic-settings==2.0.3",
-    ],
-    extras_require={
-        "test": [
-            "pytest==7.4.3",
-            "pytest-asyncio==0.21.1",
-            "pytest-mock==3.12.0",
-            "rich==13.4.2",
-        ],
-    },
     python_requires=">=3.9",
 ) 

@@ -1,6 +1,4 @@
-import httpx
 import os
-from dotenv import load_dotenv
 import json
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -8,11 +6,12 @@ import asyncio
 from typing import List, Dict, Any, Optional
 import hashlib
 import redis
-
-load_dotenv()
+import httpx
+from app.services.model_provider import model_provider
 
 class EmbeddingService:
     def __init__(self):
+        self.provider = os.getenv("CHAT_PROVIDER", "ollama").lower()
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.model = "nomic-embed-text"  # Default embedding model
         
@@ -133,6 +132,9 @@ class EmbeddingService:
         Schedule embedding generation using pgAI's vectorize_job function.
         This uses the vectorizer-worker to asynchronously generate embeddings.
         """
+        if self.provider != "ollama":
+            # Do not store embeddings in Postgres for online models
+            return None
         try:
             # Check if we're in a test environment
             if "pytest" in os.environ.get("PYTHONPATH", ""):
