@@ -353,7 +353,6 @@ class PersonalityService:
             asyncio.create_task(self.generate_response(user_id, question, db))
 
     async def _generate_related_questions(self, original_question: str, original_answer: str, system_prompt: str) -> List[str]:
-        url = f"{self.base_url}/api/chat"
         followup_system_prompt = "You are a helpful assistant tasked with generating natural follow-up questions. " + \
                                "Based on the conversation, suggest questions that would naturally continue the discussion " + \
                                "in a way that's consistent with the personality profile. Focus on questions that are " + \
