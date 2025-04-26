@@ -14,12 +14,6 @@ Interests: {interests}.
 Values: {values}.
 Personality summary: {summary}.
 
-Here are some examples of {username}'s previous responses:
-- Question: {example_question_1}
-  Response: {example_response_1}
-- Question: {example_question_2}
-  Response: {example_response_2}
-
 Current conversation context:
 - Topic: {topic}
 - Participants: {participants}
