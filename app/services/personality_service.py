@@ -13,6 +13,7 @@ from app.models.personality import PersonalityProfile
 from app.services.embedding_service import embedding_service
 from app.core.prompt_manager import prompt_manager
 from app.services.model_provider import model_provider
+import re
 
 class PersonalityService:
     def __init__(self):
@@ -168,15 +169,12 @@ class PersonalityService:
             if "message" in result and "content" in result["message"]:
                 content = result["message"]["content"]
                 try:
-                    content = content.strip()
-                    if content.startswith("```json"):
-                        content = content[7:]
-                    elif content.startswith("```"):
-                        content = content[3:]
-                    if content.endswith("```"):
-                        content = content[:-3]
-                    content = content.strip()
+                    print(f"Raw model response content: {content}")  # Debug print
+                    content = self.extract_json_from_response(content)
                     parsed_content = json.loads(content)
+                    if not isinstance(parsed_content, dict):
+                        print(f"Parsed content is not a dict: {parsed_content}")
+                        return None
                     return parsed_content
                 except Exception as e:
                     print(f"Failed to parse JSON from response: {content}")
@@ -188,6 +186,23 @@ class PersonalityService:
         except Exception as e:
             print(f"Exception when calling model provider: {str(e)}")
             return None
+
+    def extract_json_from_response(self, content: str) -> str:
+        """
+        Extract the first valid JSON object from a string, removing code fences and extra text.
+        """
+        content = content.strip()
+        # Remove ```json or ``` at the start
+        content = re.sub(r"^```json", "", content, flags=re.IGNORECASE).strip()
+        content = re.sub(r"^```", "", content).strip()
+        # Remove trailing ```
+        content = re.sub(r"```$", "", content).strip()
+        # Find the first { and last } to extract the JSON object
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            content = content[start:end+1]
+        return content
 
     async def generate_response(self, user_id: int, question: str, db: Session) -> Optional[str]:
         cache_key = self._get_cache_key(user_id, question)
@@ -485,7 +500,8 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             message_count=len(new_messages)
         )
         traits_delta = await self._generate_analysis(message_texts, formatted_prompt)
-        if traits_delta is None:
+        if not isinstance(traits_delta, dict):
+            print(f"traits_delta is not a dict: {traits_delta}")
             print(f"Failed to generate incremental analysis, falling back to full profile generation")
             existing_profile.is_active = False
             db.commit()
@@ -783,5 +799,17 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             message_context = "\n".join(context_texts)
             system_prompt += f"\n\nFor additional context, here are some of your past messages that seem relevant to the current question:\n\n{message_context}\n\nUse these messages to inform your response in a natural way."
         return system_prompt
+
+    def _select_representative_messages(self, messages, max_count, db):
+        """
+        Select up to max_count representative messages from the list.
+        This implementation simply picks the most recent messages.
+        """
+        # Sort messages by created_at if available, else by id
+        if hasattr(messages[0], 'created_at'):
+            sorted_msgs = sorted(messages, key=lambda m: m.created_at, reverse=True)
+        else:
+            sorted_msgs = sorted(messages, key=lambda m: m.id, reverse=True)
+        return sorted_msgs[:max_count]
 
 personality_service = PersonalityService() 

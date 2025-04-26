@@ -9,23 +9,19 @@ class GeminiProvider:
         self.embedding_model = os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
 
     async def generate_chat(self, messages, system_prompt=None, stream=False, format_json=False):
-        # Prepare the conversation history in the new SDK format
-        history = []
+        # Gemini SDK expects a list of strings for chat history
+        contents = []
         if system_prompt:
-            history.append({"role": "system", "parts": [system_prompt]})
+            contents.append(system_prompt)
         for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            history.append({"role": role, "parts": [content]})
-        # The new SDK expects a flat list of message contents
-        # We'll concatenate all user/assistant messages for context
-        # But the API supports a list of messages as 'contents'
+            # Only the message content is needed
+            contents.append(msg.get("content", ""))
         import asyncio
         loop = asyncio.get_event_loop()
         def call():
             response = self.client.models.generate_content(
                 model=self.chat_model,
-                contents=history
+                contents=contents
             )
             return response
         response = await loop.run_in_executor(None, call)
@@ -39,6 +35,9 @@ class GeminiProvider:
                 model=self.embedding_model,
                 contents=text
             )
-            return response.embedding
+            print("DEBUG: embed_content response:", response)
+            print("DEBUG: dir(response):", dir(response))
+            # Return the first embedding vector
+            return response.embeddings[0].values
         embedding = await loop.run_in_executor(None, call)
         return embedding 

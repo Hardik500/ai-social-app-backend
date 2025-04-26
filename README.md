@@ -529,7 +529,7 @@ GET /personalities/users/john_doe/profile-status
 GET /personalities/users/john_doe?active_only=true
 ```
 
-This allows the API to remain responsive even when handling computationally intensive tasks.
+This allows the API to remain responsive even when handling computationally intensive tasks. 
 
 ## Model Providers: Ollama & Google Gemini
 
