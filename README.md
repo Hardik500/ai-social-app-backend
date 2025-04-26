@@ -529,4 +529,87 @@ GET /personalities/users/john_doe/profile-status
 GET /personalities/users/john_doe?active_only=true
 ```
 
-This allows the API to remain responsive even when handling computationally intensive tasks. 
+This allows the API to remain responsive even when handling computationally intensive tasks.
+
+## Model Providers: Ollama & Google Gemini
+
+This backend supports both **local** (Ollama) and **cloud** (Google Gemini) models for chat and embeddings, with a unified abstraction layer. You can switch between providers by changing a single environment variable.
+
+### Supported Providers
+- **Ollama** (local, e.g., llama3)
+- **Google Gemini** (cloud, e.g., gemini-1.5-flash)
+
+### Switching Providers
+Set the `CHAT_PROVIDER` environment variable:
+
+- `CHAT_PROVIDER=ollama` (default, uses local Ollama)
+- `CHAT_PROVIDER=gemini` (uses Google Gemini API)
+
+#### Example `.env` for Gemini
+```
+CHAT_PROVIDER=gemini
+GOOGLE_API_KEY=your-gemini-api-key
+GEMINI_CHAT_MODEL=gemini-1.5-flash
+GEMINI_EMBEDDING_MODEL=models/embedding-001
+```
+
+#### Example `.env` for Ollama
+```
+CHAT_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_CHAT_MODEL=llama3
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+```
+
+### Embedding Storage Logic
+- **Ollama**: Embeddings are stored in Postgres (as before).
+- **Gemini**: Embeddings are fetched from the API as needed (not stored in Postgres, but optionally cached in Redis).
+
+### Adding New Models
+Each provider has its own file in `app/services/model_providers/` (e.g., `ollama_provider.py`, `gemini_provider.py`).
+To add a new provider:
+1. Create a new file in `model_providers/` implementing `generate_chat` and `generate_embedding`.
+2. Update `model_provider.py` to recognize the new provider.
+
+### Requirements for Gemini
+- Install the official Gemini SDK:
+  ```bash
+  pip install google-generativeai
+  ```
+- Obtain an API key from [Google AI Studio](https://ai.google.dev/gemini-api/tutorials/anomaly_detection)
+- Set `GOOGLE_API_KEY` in your environment
+- See [Gemini API Python Quickstart](https://ai.google.dev/examples/anomaly_detection) for more details
+
+### Example Usage
+All chat and embedding logic is routed through the abstraction. To switch models, just change `CHAT_PROVIDER` and relevant model names in your `.env`.
+
+## Environment Variables (Updated)
+
+- `CHAT_PROVIDER`: Which provider to use (`ollama` or `gemini`)
+- `GOOGLE_API_KEY`: API key for Gemini (required if using Gemini)
+- `GEMINI_CHAT_MODEL`: Gemini chat model name (default: `gemini-1.5-flash`)
+- `GEMINI_EMBEDDING_MODEL`: Gemini embedding model name (default: `models/embedding-001`)
+- `OLLAMA_BASE_URL`: URL for Ollama API
+- `OLLAMA_CHAT_MODEL`: Model name for chat functionality (default: llama3)
+- `OLLAMA_EMBEDDING_MODEL`: Model name for embeddings (default: nomic-embed-text)
+- `REDIS_URL`: Redis connection URL for caching (optional)
+- `DATABASE_URL`: PostgreSQL connection string
+- `API_HOST`: Host to bind the API server
+- `API_PORT`: Port to bind the API server
+- `ENVIRONMENT`: Application environment (development, production)
+
+## Directory Structure for Model Providers
+
+```
+app/services/model_providers/
+    __init__.py
+    ollama_provider.py
+    gemini_provider.py
+    # Add new providers here
+app/services/model_provider.py  # Main abstraction
+```
+
+## References
+- [Google Gemini API Python Quickstart](https://ai.google.dev/examples/anomaly_detection)
+- [Google Gemini API Reference](https://ai.google.dev/api?lang=python)
+- [Google Gemini API: Generate Content](https://ai.google.dev/api/generate-content) 
