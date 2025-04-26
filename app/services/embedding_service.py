@@ -36,45 +36,18 @@ class EmbeddingService:
         self.semaphore = asyncio.Semaphore(5)  # Allow up to 5 concurrent embedding calls
     
     async def generate_embedding(self, text: str) -> list[float]:
-        """Generate embeddings for the given text using Ollama API directly with caching."""
-        # Generate cache key
+        """Generate embeddings for the given text using the selected provider with caching."""
         cache_key = self._get_cache_key(text)
-        
-        # Try to get from cache first
         cached_embedding = await self._get_from_cache(cache_key)
         if cached_embedding:
             return cached_embedding
-            
-        # If not in cache, generate new embedding with rate limiting
-        async with self.semaphore:
-            url = f"{self.base_url}/api/embeddings"
-            
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        url,
-                        json={
-                            "model": self.model,
-                            "prompt": text
-                        },
-                        timeout=30.0
-                    )
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        embedding = data["embedding"]
-                        
-                        # Cache the embedding
-                        await self._add_to_cache(cache_key, embedding)
-                        
-                        return embedding
-                    else:
-                        error_msg = f"Error generating embedding: {response.status_code} - {response.text}"
-                        print(error_msg)
-                        raise Exception(error_msg)
-            except Exception as e:
-                print(f"Exception when calling Ollama API: {str(e)}")
-                raise e
+
+        # Use the model_provider abstraction
+        embedding = await model_provider.generate_embedding(text)
+
+        # Cache the embedding
+        await self._add_to_cache(cache_key, embedding)
+        return embedding
     
     async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for multiple texts in parallel."""
