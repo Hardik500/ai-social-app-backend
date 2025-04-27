@@ -208,11 +208,19 @@ class PersonalityService:
             content = content[start:end+1]
         return content
 
-    async def generate_response(self, user_id: int, question: str, db: Session) -> Optional[str]:
+    async def generate_response(self, user_id: int, question: str, db: Session, log_history: bool = True) -> Optional[str]:
+        cache_key = self._get_cache_key(user_id, question)
+        cached_response = self._get_from_cache(cache_key)
+        if cached_response:
+            return cached_response
         # Store the current question in ConversationHistory as a 'user' message
-        user_history_entry = ConversationHistory(user_id=user_id, role='user', content=question)
-        db.add(user_history_entry)
-        db.commit()
+        if log_history:
+            print(f"Logging history for user {user_id} and question: {question[:50]}...")
+            user_history_entry = ConversationHistory(user_id=user_id, role='user', content=question)
+            db.add(user_history_entry)
+            db.commit()
+        else:
+            print(f"Skipping history logging for user {user_id} and question: {question[:50]}...")
         # Fetch recent ingested messages
         recent_messages = (
             db.query(Message)
@@ -259,6 +267,7 @@ class PersonalityService:
             user.username,
             question
         )
+        print(f"Enhanced system prompt: {system_prompt}...")
         chat_messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": question}
@@ -269,9 +278,10 @@ class PersonalityService:
                 response_content = result["message"]["content"]
                 self._add_to_cache(self._get_cache_key(user_id, question), response_content)
                 # Store the AI's answer in ConversationHistory
-                ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=response_content)
-                db.add(ai_history_entry)
-                db.commit()
+                if log_history:
+                    ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=response_content)
+                    db.add(ai_history_entry)
+                    db.commit()
                 return response_content
             return None
         except Exception as e:
@@ -367,7 +377,7 @@ class PersonalityService:
             profile.system_prompt
         )
         for question in follow_up_questions:
-            asyncio.create_task(self.generate_response(user_id, question, db))
+            asyncio.create_task(self.generate_response(user_id, question, db, log_history=False))
 
     async def _generate_related_questions(self, original_question: str, original_answer: str, system_prompt: str) -> List[str]:
         followup_system_prompt = "You are a helpful assistant tasked with generating natural follow-up questions. " + \

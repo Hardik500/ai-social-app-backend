@@ -235,7 +235,8 @@ async def ask_question(
         )
     
     # Generate response (use cached response if available)
-    answer = await personality_service.generate_response(user.id, question.question, db)
+    print(f"Generating response for question: {question.question[:50]}...")
+    answer = await personality_service.generate_response(user.id, question.question, db, log_history=True)
     
     if not answer:
         raise HTTPException(
@@ -311,7 +312,7 @@ async def ask_question_by_email(
     
     # Generate response (use cached response if available)
     print(f"Generating response for question: {question.question[:50]}...")
-    answer = await personality_service.generate_response(user.id, question.question, db)
+    answer = await personality_service.generate_response(user.id, question.question, db, log_history=True)
     
     if not answer:
         print(f"Failed to generate response for user {user.username}")
