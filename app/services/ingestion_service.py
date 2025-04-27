@@ -52,7 +52,7 @@ class IngestionService:
         if source_type.lower() == 'slack_har':
             return self._process_slack_data(source_data, primary_user, additional_users_db, user_mapping)
         elif source_type.lower() == 'whatsapp':
-            return self._process_whatsapp_data(source_data, primary_user, additional_users_db)
+            return self._process_whatsapp_data(source_data, primary_user, additional_users_db, user_mapping)
         else:
             return {"status": "error", "message": f"Unknown source type: {source_type}"}
     
@@ -195,7 +195,8 @@ class IngestionService:
     def _process_whatsapp_data(self, 
                              data: Any, 
                              primary_user: User,
-                             additional_users: List[User] = None) -> Dict[str, Any]:
+                             additional_users: List[User] = None,
+                             user_mapping: Dict[str, str] = None) -> Dict[str, Any]:
         """
         Process WhatsApp data using the dedicated parser.
         
@@ -203,6 +204,7 @@ class IngestionService:
             data: WhatsApp data
             primary_user: Primary user object
             additional_users: Additional user objects
+            user_mapping: Mapping from WhatsApp sender names to usernames
             
         Returns:
             Dictionary with processing results
@@ -220,14 +222,39 @@ class IngestionService:
             # Use the WhatsAppParser to extract messages
             parsed_messages = WhatsAppParser.parse(data)
             
-            # Store parsed messages in the database
+            # Map usernames to user IDs for quick lookup
+            username_to_db_id = {primary_user.username: primary_user.id}
+            if additional_users:
+                for user in additional_users:
+                    username_to_db_id[user.username] = user.id
+            
             messages_imported = 0
             for parsed_msg in parsed_messages:
-                # Implementation will be completed when WhatsApp format is known
-                pass
-                
+                sender = parsed_msg.get('user_id')
+                # Use user_mapping if provided
+                mapped_username = user_mapping.get(sender) if user_mapping else None
+                username_to_check = mapped_username if mapped_username else sender
+                # Try to match username to known users (case-insensitive)
+                db_user_id = None
+                for uname, uid in username_to_db_id.items():
+                    if uname.lower() == username_to_check.lower():
+                        db_user_id = uid
+                        break
+                if db_user_id is None:
+                    # Create user if not found
+                    user = self._get_user_by_username_or_create(username_to_check)
+                    db_user_id = user.id
+                    username_to_db_id[username_to_check] = db_user_id
+                # Create message
+                message = Message(
+                    conversation_id=conversation.id,
+                    user_id=db_user_id,
+                    content=parsed_msg.get('text', ''),
+                    timestamp=parsed_msg.get('timestamp', '')
+                )
+                self.db.add(message)
+                messages_imported += 1
             self.db.commit()
-            
             return {
                 "status": "success",
                 "conversation_id": conversation.id,
