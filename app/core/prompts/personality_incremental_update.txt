@@ -29,6 +29,10 @@ You are now receiving {message_count} new messages from the same person. Your ta
   "interests": ["interest1", "interest2"],
   "values": ["value1", "value2"],
   "summary": "Updated comprehensive personality summary",
+  "response_length": "very brief | moderate | detailed", // *Update if there is a significant change in response length preference.*
+  "common_phrases": ["phrase1", "phrase2"], // *Update if new common phrases are observed.*
+  "emotional_responses": "Describe any significant change in emotional response patterns.",
+  "conflict_style": "Describe any significant change in conflict handling style.",
   "delta_summary": "Summary of significant changes from previous profile. *Explain what changed and why, based on specific examples from the new messages.*",
   "changes": {
     "traits_changed": ["trait_name1", "trait_name2"],
@@ -36,6 +40,10 @@ You are now receiving {message_count} new messages from the same person. Your ta
     "interests_removed": ["old_interest1"],
     "values_added": ["new_value1"],
     "values_removed": ["old_value1"],
-    "communication_changes": ["aspect_changed1"]
+    "communication_changes": ["aspect_changed1"],
+    "response_length_changed": true,
+    "common_phrases_changed": true,
+    "emotional_responses_changed": true,
+    "conflict_style_changed": true
   }
 }

@@ -26,6 +26,11 @@ You will analyze the messages and format your analysis as a JSON object structur
 
 5. summary: Provide a concise yet comprehensive overview of the individual's personality, highlighting key patterns in their communication style, notable interests, and how their personality traits manifest in their writing. Focus on unique characteristics that make their communication style distinctive.
 
+6. response_length: Assess the user's preferred response length (very brief, moderate, or detailed) based on their message patterns.
+7. common_phrases: List any phrases or expressions the user frequently uses.
+8. emotional_responses: Describe typical emotional response patterns (e.g., enthusiastic, reserved, neutral, etc.).
+9. conflict_style: Describe how the user typically handles disagreement or conflict (e.g., direct, diplomatic, avoids conflict, etc.).
+
 For each assessment, provide a brief justification based on specific examples from the text messages.
 
 Please ensure that the analysis is thorough, accurate, and based on observable behaviors in the text messages.

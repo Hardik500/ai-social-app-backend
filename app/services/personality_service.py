@@ -61,7 +61,6 @@ class PersonalityService:
         if message_count > MAX_MESSAGES:
             selected_messages = self._select_representative_messages(messages, MAX_MESSAGES, db)
             messages = selected_messages
-        example_messages = self._extract_example_messages(messages)
         message_texts = [msg.content for msg in messages]
         system_prompt = prompt_manager.get_template("personality_analysis")
         traits_and_description = await self._generate_analysis(message_texts, system_prompt)
@@ -73,6 +72,10 @@ class PersonalityService:
         interests = traits_and_description.get("interests", [])
         values = traits_and_description.get("values", [])
         summary = traits_and_description.get("summary", "")
+        response_length = traits_and_description.get("response_length", "moderate")
+        common_phrases = traits_and_description.get("common_phrases", [])
+        emotional_responses = traits_and_description.get("emotional_responses", "")
+        conflict_style = traits_and_description.get("conflict_style", "")
         description = prompt_manager.format_template(
             "description_template",
             summary=summary,
@@ -105,10 +108,10 @@ class PersonalityService:
             values=values if isinstance(values, str) else \
                 ', '.join(values) if isinstance(values, list) else values,
             summary=summary,
-            example_question_1=example_messages.get("question1", "How are you today?"),
-            example_response_1=example_messages.get("response1", "I'm doing well, thanks for asking!"),
-            example_question_2=example_messages.get("question2", "What do you think about this project?"),
-            example_response_2=example_messages.get("response2", "I think it's interesting and has a lot of potential."),
+            response_length=response_length,
+            common_phrases=common_phrases if isinstance(common_phrases, str) else ', '.join(common_phrases) if isinstance(common_phrases, list) else common_phrases,
+            emotional_responses=emotional_responses,
+            conflict_style=conflict_style,
             topic="general conversation",
             participants=f"{user.username} and others",
             mood="neutral"
@@ -509,6 +512,10 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
         latest_message_id = max(msg.id for msg in new_messages) if new_messages else existing_profile.last_message_id
         total_message_count = existing_profile.message_count + len(new_messages)
         summary = updated_traits.get("summary", "")
+        response_length = updated_traits.get("response_length", "moderate")
+        common_phrases = updated_traits.get("common_phrases", [])
+        emotional_responses = updated_traits.get("emotional_responses", "")
+        conflict_style = updated_traits.get("conflict_style", "")
         traits = updated_traits.get("traits", {})
         communication_style = updated_traits.get("communication_style", {})
         interests = updated_traits.get("interests", [])
@@ -546,10 +553,10 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             values=values if isinstance(values, str) else \
                 ', '.join(values) if isinstance(values, list) else values,
             summary=summary,
-            example_question_1=example_messages.get("question1", "How are you today?"),
-            example_response_1=example_messages.get("response1", "I'm doing well, thanks for asking!"),
-            example_question_2=example_messages.get("question2", "What do you think about this project?"),
-            example_response_2=example_messages.get("response2", "I think it's interesting and has a lot of potential."),
+            response_length=response_length,
+            common_phrases=common_phrases if isinstance(common_phrases, str) else ', '.join(common_phrases) if isinstance(common_phrases, list) else common_phrases,
+            emotional_responses=emotional_responses,
+            conflict_style=conflict_style,
             topic="general conversation",
             participants=f"{username} and others",
             mood="neutral"
@@ -712,22 +719,6 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             merged["summary"] = "This individual " + " ".join(summaries)
         return merged
 
-    def _extract_example_messages(self, messages: List[Message]) -> Dict[str, str]:
-        example_messages = {}
-        example_messages = {
-            "question1": "How are you today?",
-            "response1": "I'm doing well, thanks for asking!",
-            "question2": "What do you think about this project?",
-            "response2": "I think it's interesting and has a lot of potential."
-        }
-        recent_messages = sorted(messages, key=lambda m: m.created_at, reverse=True)
-        if len(recent_messages) >= 2:
-            example_messages["response1"] = recent_messages[0].content
-            example_messages["question1"] = self._generate_plausible_question(recent_messages[0].content)
-            example_messages["response2"] = recent_messages[1].content
-            example_messages["question2"] = self._generate_plausible_question(recent_messages[1].content)
-        return example_messages
-
     def _generate_plausible_question(self, message_content: str) -> str:
         greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]
         if any(message_content.lower().startswith(greeting) for greeting in greetings):
@@ -755,6 +746,10 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
         interests = profile.traits.get("interests", [])
         values = profile.traits.get("values", [])
         summary = profile.traits.get("summary", "")
+        response_length = profile.traits.get("response_length", "moderate")
+        common_phrases = profile.traits.get("common_phrases", [])
+        emotional_responses = profile.traits.get("emotional_responses", "")
+        conflict_style = profile.traits.get("conflict_style", "")
         example_messages = {}
         example_messages = {
             "question1": "How are you today?",
@@ -783,10 +778,10 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             values=values if isinstance(values, str) else \
                 ', '.join(values) if isinstance(values, list) else values,
             summary=summary,
-            example_question_1=example_messages["question1"],
-            example_response_1=example_messages["response1"],
-            example_question_2=example_messages["question2"],
-            example_response_2=example_messages["response2"],
+            response_length=response_length,
+            common_phrases=common_phrases if isinstance(common_phrases, str) else ', '.join(common_phrases) if isinstance(common_phrases, list) else common_phrases,
+            emotional_responses=emotional_responses,
+            conflict_style=conflict_style,
             topic=f"answering '{question}'",
             participants=f"{username} and the person asking the question",
             mood="helpful"
