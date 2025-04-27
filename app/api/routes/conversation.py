@@ -12,9 +12,9 @@ import os
 import httpx
 
 from app.db.database import get_db
-from app.models.schemas import ConversationCreate, ConversationResponse
+from app.models.schemas import ConversationCreate, ConversationResponse, ConversationHistoryCreate, ConversationHistoryResponse
 from app.models.user import User
-from app.models.conversation import Conversation, Message
+from app.models.conversation import Conversation, Message, ConversationHistory
 from app.services.embedding_service import embedding_service, embedding_auto_updater
 
 router = APIRouter(
@@ -429,3 +429,24 @@ async def retrieval_augmented_generation(
             "error": str(e),
             "context_used": []
         } 
+
+@router.get("/history/{user_id}", response_model=List[ConversationHistoryResponse])
+def get_conversation_history(user_id: int, db: Session = Depends(get_db)):
+    """Get all conversation history for a user (single session)."""
+    return db.query(ConversationHistory).filter(ConversationHistory.user_id == user_id).order_by(ConversationHistory.created_at).all()
+
+@router.post("/history/", response_model=ConversationHistoryResponse)
+def add_conversation_history(entry: ConversationHistoryCreate, db: Session = Depends(get_db)):
+    """Add a message to the conversation history (single session)."""
+    new_entry = ConversationHistory(**entry.dict())
+    db.add(new_entry)
+    db.commit()
+    db.refresh(new_entry)
+    return new_entry
+
+@router.delete("/history/{user_id}")
+def clear_conversation_history(user_id: int, db: Session = Depends(get_db)):
+    """Clear all conversation history for a user (single session)."""
+    db.query(ConversationHistory).filter(ConversationHistory.user_id == user_id).delete()
+    db.commit()
+    return {"status": "success", "message": f"Cleared conversation history for user {user_id}"} 

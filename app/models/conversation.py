@@ -43,4 +43,19 @@ class Message(Base):
     
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
-    user = relationship("User", back_populates="messages") 
+    user = relationship("User", back_populates="messages")
+
+
+class ConversationHistory(Base):
+    __tablename__ = "conversation_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    role = Column(String(10))  # 'user' or 'ai'
+    content = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", back_populates="conversation_histories")
+
+# Add to User model (if not already):
+# conversation_histories = relationship("ConversationHistory", back_populates="user", cascade="all, delete-orphan") 

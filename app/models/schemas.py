@@ -104,4 +104,19 @@ class IngestionResultSchema(BaseModel):
     status: str
     conversation_id: Optional[int] = None
     messages_imported: Optional[int] = None
-    message: Optional[str] = None 
+    message: Optional[str] = None
+
+class ConversationHistoryCreate(BaseModel):
+    user_id: int
+    role: str  # 'user' or 'ai'
+    content: str
+
+class ConversationHistoryResponse(BaseModel):
+    id: int
+    user_id: int
+    role: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True 

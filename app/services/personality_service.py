@@ -7,8 +7,9 @@ import time
 import hashlib
 import redis
 from sqlalchemy.orm import Session
+from sqlalchemy import asc
 from app.models.user import User
-from app.models.conversation import Message
+from app.models.conversation import Message, ConversationHistory
 from app.models.personality import PersonalityProfile
 from app.services.embedding_service import embedding_service
 from app.core.prompt_manager import prompt_manager
@@ -208,19 +209,11 @@ class PersonalityService:
         return content
 
     async def generate_response(self, user_id: int, question: str, db: Session) -> Optional[str]:
-        cache_key = self._get_cache_key(user_id, question)
-        cached_response = self._get_from_cache(cache_key)
-        if cached_response:
-            return cached_response
-        profile = db.query(PersonalityProfile).filter(
-            PersonalityProfile.user_id == user_id,
-            PersonalityProfile.is_active == True
-        ).first()
-        if not profile:
-            return None
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            return None
+        # Store the current question in ConversationHistory as a 'user' message
+        user_history_entry = ConversationHistory(user_id=user_id, role='user', content=question)
+        db.add(user_history_entry)
+        db.commit()
+        # Fetch recent ingested messages
         recent_messages = (
             db.query(Message)
             .filter(Message.user_id == user_id)
@@ -228,7 +221,16 @@ class PersonalityService:
             .limit(50)
             .all()
         )
+        # Fetch current session's conversation history
+        session_history = db.query(ConversationHistory).filter(ConversationHistory.user_id == user_id).order_by(asc(ConversationHistory.created_at)).all()
         user_context = f"\nUser Information:\n"
+        user = db.query(User).filter(User.id == user_id).first()
+        profile = db.query(PersonalityProfile).filter(
+            PersonalityProfile.user_id == user_id,
+            PersonalityProfile.is_active == True
+        ).first()
+        if not user or not profile:
+            return None
         user_context += f"- Username: {user.username}\n"
         if hasattr(user, 'email') and user.email:
             user_context += f"- Email: {user.email}\n"
@@ -240,13 +242,21 @@ class PersonalityService:
             user_context += f"- Total messages: {profile.message_count}\n"
         conversation_history = ""
         if recent_messages:
-            conversation_history = "\nRecent conversation history:\n"
+            conversation_history = "\nRecent ingested conversation history:\n"
             for msg in reversed(recent_messages):
                 timestamp = f" ({msg.created_at.strftime('%Y-%m-%d %H:%M')})" if hasattr(msg, 'created_at') and msg.created_at else ""
                 conversation_history += f"- {msg.content}{timestamp}\n"
+        session_history_str = ""
+        if session_history:
+            session_history_str = "\nCurrent session conversation history:\n"
+            for entry in session_history:
+                role = "You" if entry.role == "user" else "AI"
+                session_history_str += f"- {role}: {entry.content}\n"
+        # Explicitly include the current question in the prompt context
+        current_question_context = f"\nCurrent question: {question}\n"
         system_prompt = self._enhance_system_prompt_for_question(
-            profile.system_prompt + user_context + conversation_history, 
-            user.username, 
+            profile.system_prompt + user_context + conversation_history + session_history_str + current_question_context,
+            user.username,
             question
         )
         chat_messages = [
@@ -257,7 +267,11 @@ class PersonalityService:
             result = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False)
             if "message" in result and "content" in result["message"]:
                 response_content = result["message"]["content"]
-                self._add_to_cache(cache_key, response_content)
+                self._add_to_cache(self._get_cache_key(user_id, question), response_content)
+                # Store the AI's answer in ConversationHistory
+                ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=response_content)
+                db.add(ai_history_entry)
+                db.commit()
                 return response_content
             return None
         except Exception as e:
