@@ -226,7 +226,7 @@ class PersonalityService:
             db.query(Message)
             .filter(Message.user_id == user_id)
             .order_by(Message.created_at.desc())
-            .limit(50)
+            .limit(500)
             .all()
         )
         # Fetch current session's conversation history
