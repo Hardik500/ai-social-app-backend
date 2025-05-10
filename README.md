@@ -275,6 +275,57 @@ This endpoint analyzes all messages from a user to generate a detailed personali
 
 A user must have at least 5 messages in the database to generate a profile.
 
+#### Generate Personality Profiles in Bulk
+
+```
+POST /personalities/emails/bulk-generate
+```
+
+This endpoint generates personality profiles for multiple users based on their email addresses. It's useful for batch processing when profiles need to be regenerated for a group of users.
+
+Request body example:
+
+```json
+{
+  "emails": [
+    "user1@example.com",
+    "user2@example.com",
+    "user3@example.com"
+  ]
+}
+```
+
+Response example:
+
+```json
+{
+  "total": 3,
+  "successful": 2,
+  "failed": 1,
+  "details": [
+    {
+      "email": "user1@example.com",
+      "status": "processing",
+      "user_id": 123,
+      "username": "user1"
+    },
+    {
+      "email": "user2@example.com",
+      "status": "processing",
+      "user_id": 124,
+      "username": "user2"
+    },
+    {
+      "email": "user3@example.com",
+      "status": "failed",
+      "reason": "User with email 'user3@example.com' not found"
+    }
+  ]
+}
+```
+
+The generation happens asynchronously in the background, with each profile being generated independently. You can check the status of each profile generation using the profile status endpoints.
+
 #### Get User's Personality Profiles
 
 ```

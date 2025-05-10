@@ -518,7 +518,6 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             print(f"Selected {len(selected_messages)} representative new messages from {len(new_messages)} total new")
             new_messages = selected_messages
         message_texts = [msg.content for msg in new_messages]
-        example_messages = self._extract_example_messages(new_messages)
         existing_traits = existing_profile.traits
         system_prompt = prompt_manager.get_template("personality_incremental_update")
         formatted_prompt = system_prompt.format(

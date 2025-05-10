@@ -89,6 +89,50 @@ def test_generate_personality_profile(mock_embedding_service, mock_personality_s
     assert data["message_count"] == 10
     assert "system_prompt" in data
 
+def test_bulk_generate_personality_profiles(mock_embedding_service, mock_personality_service):
+    """Test generating personality profiles for multiple users via bulk email endpoint"""
+    # First, create a conversation to have some user data
+    client.post("/conversations/", json=TEST_CONVERSATION)
+    
+    # Get the email from the test conversation
+    email = TEST_CONVERSATION["primary_user_info"].get("email", "test@example.com")
+    
+    # Create request with valid and invalid emails
+    request_data = {
+        "emails": [email, "nonexistent@example.com"]
+    }
+    
+    # Call the bulk generate endpoint
+    response = client.post(f"/personalities/emails/bulk-generate", json=request_data)
+    
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Check response structure
+    assert "total" in data
+    assert "successful" in data
+    assert "failed" in data
+    assert "details" in data
+    
+    # Check counts
+    assert data["total"] == 2
+    assert data["successful"] == 1
+    assert data["failed"] == 1
+    
+    # Check details
+    assert len(data["details"]) == 2
+    
+    # Find the successful entry
+    successful_entry = next((entry for entry in data["details"] if entry["status"] == "processing"), None)
+    assert successful_entry is not None
+    assert successful_entry["email"] == email
+    
+    # Find the failed entry
+    failed_entry = next((entry for entry in data["details"] if entry["status"] == "failed"), None)
+    assert failed_entry is not None
+    assert failed_entry["email"] == "nonexistent@example.com"
+    assert "reason" in failed_entry
+
 def test_get_user_profiles(mock_embedding_service, mock_personality_service):
     """Test retrieving personality profiles for a user"""
     # First, create a conversation and profile

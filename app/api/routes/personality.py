@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 import httpx
 import numpy as np
+from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.models.user import User
@@ -118,6 +119,71 @@ async def generate_personality_profile_by_email(
         "user_id": user.id,
         "username": user.username
     }
+
+class BulkEmailRequest(BaseModel):
+    emails: List[str]
+
+@router.post("/emails/bulk-generate", response_model=Dict[str, Any])
+async def bulk_generate_personality_profiles(
+    request: BulkEmailRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Generate personality profiles for multiple users based on their emails.
+    
+    This endpoint takes a list of email addresses and starts background tasks
+    to generate personality profiles for each valid user.
+    
+    The profile generation happens in the background to prevent blocking the API.
+    """
+    results = {
+        "total": len(request.emails),
+        "successful": 0,
+        "failed": 0,
+        "details": []
+    }
+    
+    for email in request.emails:
+        # Find the user by email
+        user = db.query(User).filter(User.email == email).first()
+        
+        if not user:
+            results["failed"] += 1
+            results["details"].append({
+                "email": email,
+                "status": "failed",
+                "reason": f"User with email '{email}' not found"
+            })
+            continue
+        
+        # Verify the user has enough messages to generate a profile
+        message_count = db.query(Message).filter(Message.user_id == user.id).count()
+        if message_count < 5:  # Require at least 5 messages for a good profile
+            results["failed"] += 1
+            results["details"].append({
+                "email": email,
+                "status": "failed",
+                "reason": f"Insufficient messages. User needs at least 5 messages."
+            })
+            continue
+        
+        # Start background task for profile generation
+        background_tasks.add_task(
+            personality_service.generate_profile,
+            user.id,
+            db
+        )
+        
+        results["successful"] += 1
+        results["details"].append({
+            "email": email,
+            "status": "processing",
+            "user_id": user.id,
+            "username": user.username
+        })
+    
+    return results
 
 @router.get("/users/{username}", response_model=List[PersonalityProfileResponse])
 def get_user_personality_profiles(username: str, active_only: bool = False, db: Session = Depends(get_db)):
