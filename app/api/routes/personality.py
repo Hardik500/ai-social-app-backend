@@ -1,9 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
-import asyncio
-import json
+from typing import List, Dict, Any
 import os
 import httpx
 import numpy as np
@@ -193,7 +191,6 @@ async def ask_question(
     username: str, 
     question: QuestionRequest, 
     stream: bool = False,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db)
 ):
     """
@@ -244,12 +241,6 @@ async def ask_question(
             detail=f"Failed to generate response"
         )
     
-    # Preload more responses in the background after successful response
-    background_tasks.add_task(
-        personality_service.preload_related_questions,
-        user.id, question.question, answer, db
-    )
-    
     return AnswerResponse(
         question=question.question,
         answer=answer,
@@ -260,7 +251,6 @@ async def ask_question_by_email(
     email: str, 
     question: QuestionRequest, 
     stream: bool = False,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db)
 ):
     """
@@ -325,10 +315,6 @@ async def ask_question_by_email(
     
     # Preload more responses in the background after successful response
     print(f"Adding background task to preload related questions for user {user.username}")
-    background_tasks.add_task(
-        personality_service.preload_related_questions, 
-        user.id, question.question, answer, db
-    )
     
     return AnswerResponse(
         question=question.question,
@@ -342,7 +328,6 @@ async def ask_personality_with_rag(
     question: QuestionRequest,
     max_context_messages: int = 5,
     model: str = None,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db)
 ):
     """
@@ -454,13 +439,7 @@ async def ask_personality_with_rag(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error generating response: {str(e)}"
         )
-    
-    # Preload more responses in the background after successful response
-    background_tasks.add_task(
-        personality_service.preload_related_questions,
-        user.id, question.question, answer, db
-    )
-    
+
     # Return the enhanced response with context information
     return {
         "question": question.question,
