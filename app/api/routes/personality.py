@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import os
 import httpx
 import numpy as np
@@ -252,6 +252,111 @@ def get_profile_by_id(profile_id: int, db: Session = Depends(get_db)):
     
     return profile
 
+# Helper functions for question handling
+async def _handle_question_request(
+    user: User,
+    question: QuestionRequest,
+    stream: bool, 
+    db: Session
+) -> Union[StreamingResponse, AnswerResponse]:
+    """
+    Common handler for processing question requests across different routes.
+    
+    This function handles the core business logic for processing questions:
+    - Checking for active profile
+    - Handling streaming vs non-streaming
+    - Generating responses
+    - Creating conversation context
+    - Building response object
+    
+    Parameters:
+    - user: The User object that the question is directed to
+    - question: The question being asked
+    - stream: Whether to stream the response
+    - db: Database session
+    """
+    # Check if user has an active profile
+    profile = db.query(PersonalityProfile).filter(
+        PersonalityProfile.user_id == user.id,
+        PersonalityProfile.is_active == True
+    ).first()
+    
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"User doesn't have an active personality profile. Generate one first."
+        )
+    
+    # If streaming is requested, use streaming response
+    if stream:
+        # Pass multi_message flag if present
+        use_multi_message = getattr(question, 'multi_message', False)
+        return StreamingResponse(
+            personality_service.generate_response_stream(
+                user.id, 
+                question.question, 
+                db,
+                multi_message=use_multi_message
+            ),
+            media_type="application/json"
+        )
+    
+    # Generate response (use cached response if available)
+    print(f"Generating response for question: {question.question[:50]}...")
+    
+    # Pass multi_message flag if present
+    use_multi_message = getattr(question, 'multi_message', False)
+    answers = await personality_service.generate_response(
+        user.id, 
+        question.question, 
+        db, 
+        log_history=True,
+        multi_message=use_multi_message
+    )
+    
+    if not answers:
+        print(f"Failed to generate response for user {user.username}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate response"
+        )
+    
+    print(f"Successfully generated response for user {user.username}")
+    
+    # Create conversation context with relevant information
+    conversation_context = {
+        "topic": _detect_topic(question.question),
+        "tone": _detect_tone(question.question),
+        "interests_matched": _find_matching_interests(question.question, profile.traits.get("interests", []))
+    }
+    
+    return AnswerResponse(
+        question=question.question,
+        answers=answers,
+        username=user.username,
+        conversation_context=conversation_context
+    )
+
+def _get_user_by_username(username: str, db: Session) -> User:
+    """Get a user by username with appropriate error handling."""
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with username '{username}' not found"
+        )
+    return user
+
+def _get_user_by_email(email: str, db: Session) -> User:
+    """Get a user by email with appropriate error handling."""
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with email '{email}' not found"
+        )
+    return user
+
 @router.post("/users/{username}/ask", response_model=AnswerResponse)
 async def ask_question(
     username: str, 
@@ -272,103 +377,10 @@ async def ask_question(
     - stream: If true, return a streaming response (helpful for longer responses)
     """
     # Find the user
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with username '{username}' not found"
-        )
+    user = _get_user_by_username(username, db)
     
-    # Check if user has an active profile
-    profile = db.query(PersonalityProfile).filter(
-        PersonalityProfile.user_id == user.id,
-        PersonalityProfile.is_active == True
-    ).first()
-    
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"User doesn't have an active personality profile. Generate one first."
-        )
-    
-    # If streaming is requested, use streaming response
-    if stream:
-        return StreamingResponse(
-            personality_service.generate_response_stream(user.id, question.question, db),
-            media_type="application/json"
-        )
-    
-    # Generate response (use cached response if available)
-    print(f"Generating response for question: {question.question[:50]}...")
-    answers = await personality_service.generate_response(user.id, question.question, db, log_history=True)
-    
-    if not answers:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate response"
-        )
-    
-    # Create conversation context with relevant information
-    conversation_context = {
-        "topic": _detect_topic(question.question),
-        "tone": _detect_tone(question.question),
-        "interests_matched": _find_matching_interests(question.question, profile.traits.get("interests", []))
-    }
-    
-    return AnswerResponse(
-        question=question.question,
-        answers=answers,
-        username=username,
-        conversation_context=conversation_context
-    )
-
-# Helper functions for enhanced conversation context
-def _detect_topic(question: str) -> str:
-    """Detect the general topic of a question."""
-    question_lower = question.lower()
-    if any(word in question_lower for word in ["work", "job", "career", "project", "task"]):
-        return "work"
-    elif any(word in question_lower for word in ["family", "friend", "relationship", "partner"]):
-        return "relationships"
-    elif any(word in question_lower for word in ["hobby", "interest", "fun", "enjoy"]):
-        return "interests"
-    elif any(word in question_lower for word in ["health", "fitness", "exercise", "diet"]):
-        return "health"
-    elif any(word in question_lower for word in ["tech", "technology", "computer", "app", "software"]):
-        return "technology"
-    return "general"
-
-def _detect_tone(question: str) -> str:
-    """Detect the tone of a question."""
-    question_lower = question.lower()
-    if any(word in question_lower for word in ["urgent", "emergency", "critical", "asap"]):
-        return "urgent"
-    elif any(word in question_lower for word in ["sad", "sorry", "upset", "disappointed"]):
-        return "empathetic"
-    elif any(word in question_lower for word in ["excited", "happy", "great", "awesome"]):
-        return "positive"
-    elif any(word in question_lower for word in ["confused", "understand", "unclear", "explain"]):
-        return "explanatory"
-    elif any(word in question_lower for word in ["agree", "disagree", "opinion", "think"]):
-        return "thoughtful"
-    return "neutral"
-
-def _find_matching_interests(question: str, interests: List) -> List[str]:
-    """Find interests from the user's profile that match the question."""
-    if not interests:
-        return []
-    
-    # Convert interests to list if it's a string
-    if isinstance(interests, str):
-        interests = [i.strip() for i in interests.split(',')]
-    
-    question_lower = question.lower()
-    matching = []
-    for interest in interests:
-        if isinstance(interest, str) and interest.lower() in question_lower:
-            matching.append(interest)
-    
-    return matching
+    # Handle the question with common logic
+    return await _handle_question_request(user, question, stream, db)
 
 @router.post("/email/{email}/ask", response_model=AnswerResponse)
 async def ask_question_by_email(
@@ -390,61 +402,10 @@ async def ask_question_by_email(
     - stream: If true, return a streaming response (helpful for longer responses)
     """
     # Find the user by email
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with email '{email}' not found"
-        )
+    user = _get_user_by_email(email, db)
     
-    # Check if user has an active profile
-    profile = db.query(PersonalityProfile).filter(
-        PersonalityProfile.user_id == user.id,
-        PersonalityProfile.is_active == True
-    ).first()
-    
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"User doesn't have an active personality profile. Generate one first."
-        )
-    
-    # If streaming is requested, use streaming response
-    if stream:
-        return StreamingResponse(
-            personality_service.generate_response_stream(user.id, question.question, db),
-            media_type="application/json"
-        )
-    
-    # Generate response (use cached response if available)
-    print(f"Generating response for question: {question.question[:50]}...")
-    answers = await personality_service.generate_response(user.id, question.question, db, log_history=True)
-    
-    if not answers:
-        print(f"Failed to generate response for user {user.username}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate response"
-        )
-    
-    print(f"Successfully generated response for user {user.username}")
-    
-    # Create conversation context with relevant information
-    conversation_context = {
-        "topic": _detect_topic(question.question),
-        "tone": _detect_tone(question.question),
-        "interests_matched": _find_matching_interests(question.question, profile.traits.get("interests", []))
-    }
-    
-    # Preload more responses in the background after successful response
-    print(f"Adding background task to preload related questions for user {user.username}")
-    
-    return AnswerResponse(
-        question=question.question,
-        answers=answers,
-        username=user.username,
-        conversation_context=conversation_context
-    )
+    # Handle the question with common logic
+    return await _handle_question_request(user, question, stream, db)
 
 @router.post("/users/{username}/ask/rag")
 async def ask_personality_with_rag(
@@ -688,4 +649,52 @@ async def check_profile_generation_status_by_email(email: str, db: Session = Dep
         "message": "No active profile found. If you requested profile generation, it may still be processing.",
         "user_id": user.id,
         "username": user.username
-    } 
+    }
+
+# Helper functions for enhanced conversation context
+def _detect_topic(question: str) -> str:
+    """Detect the general topic of a question."""
+    question_lower = question.lower()
+    if any(word in question_lower for word in ["work", "job", "career", "project", "task"]):
+        return "work"
+    elif any(word in question_lower for word in ["family", "friend", "relationship", "partner"]):
+        return "relationships"
+    elif any(word in question_lower for word in ["hobby", "interest", "fun", "enjoy"]):
+        return "interests"
+    elif any(word in question_lower for word in ["health", "fitness", "exercise", "diet"]):
+        return "health"
+    elif any(word in question_lower for word in ["tech", "technology", "computer", "app", "software"]):
+        return "technology"
+    return "general"
+
+def _detect_tone(question: str) -> str:
+    """Detect the tone of a question."""
+    question_lower = question.lower()
+    if any(word in question_lower for word in ["urgent", "emergency", "critical", "asap"]):
+        return "urgent"
+    elif any(word in question_lower for word in ["sad", "sorry", "upset", "disappointed"]):
+        return "empathetic"
+    elif any(word in question_lower for word in ["excited", "happy", "great", "awesome"]):
+        return "positive"
+    elif any(word in question_lower for word in ["confused", "understand", "unclear", "explain"]):
+        return "explanatory"
+    elif any(word in question_lower for word in ["agree", "disagree", "opinion", "think"]):
+        return "thoughtful"
+    return "neutral"
+
+def _find_matching_interests(question: str, interests: List) -> List[str]:
+    """Find interests from the user's profile that match the question."""
+    if not interests:
+        return []
+    
+    # Convert interests to list if it's a string
+    if isinstance(interests, str):
+        interests = [i.strip() for i in interests.split(',')]
+    
+    question_lower = question.lower()
+    matching = []
+    for interest in interests:
+        if isinstance(interest, str) and interest.lower() in question_lower:
+            matching.append(interest)
+    
+    return matching 

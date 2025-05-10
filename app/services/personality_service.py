@@ -208,7 +208,7 @@ class PersonalityService:
             content = content[start:end+1]
         return content
 
-    async def generate_response(self, user_id: int, question: str, db: Session, log_history: bool = True) -> Optional[List[Dict[str, str]]]:
+    async def generate_response(self, user_id: int, question: str, db: Session, log_history: bool = True, multi_message: bool = False) -> Optional[List[Dict[str, str]]]:
         cache_key = self._get_cache_key(user_id, question)
         cached_response = self._get_from_cache(cache_key)
         if cached_response:
@@ -282,6 +282,10 @@ class PersonalityService:
             user.username,
             question
         )
+        
+        # Add multi-message instruction if enabled
+        if multi_message:
+            system_prompt += "\n\nIMPORTANT: If appropriate for this conversation, respond with multiple sequential messages instead of one long message. This creates a more natural conversation flow."
         
         print(f"Enhanced system prompt: {system_prompt}...")
         
@@ -471,7 +475,7 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             print(f"Error generating related questions: {str(e)}")
             return []
 
-    async def generate_response_stream(self, user_id: int, question: str, db: Session):
+    async def generate_response_stream(self, user_id: int, question: str, db: Session, multi_message: bool = False):
         cache_key = self._get_cache_key(user_id, question)
         cached_response = self._get_from_cache(cache_key)
         if cached_response:
@@ -556,6 +560,12 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             user.username, 
             question
         )
+        
+        # Add multi-message instruction if enabled
+        if multi_message:
+            system_prompt += "\n\nIMPORTANT: If appropriate for this conversation, respond with multiple sequential messages instead of one long message. This creates a more natural conversation flow."
+        
+        print(f"Enhanced system prompt: {system_prompt}...")
         
         chat_messages = [
             {"role": "system", "content": system_prompt},
