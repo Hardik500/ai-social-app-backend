@@ -17,7 +17,12 @@ You will analyze the messages and format your analysis as a JSON object structur
    - Sentence structure (simple/complex)
    - Vocabulary (basic/advanced)
    - Punctuation (standard/creative)
-   - Use of emojis (frequent/rare)
+   - Use of emojis (none/rare/moderate/frequent) - Be very conservative in this assessment. Count actual emoji usage in messages and classify as follows:
+     * None: No emojis used
+     * Rare: 1 emoji per 3-5 messages on average
+     * Moderate: 1-2 emojis per message on average
+     * Frequent: 3+ emojis per message on average
+     Do not overestimate emoji usage; when in doubt, choose the lower frequency category.
    - Use of slang (frequent/rare)
 
 3. interests: Identify the topics they seem to show interest in, based on the frequency and depth of their engagement with those topics in the text messages.
