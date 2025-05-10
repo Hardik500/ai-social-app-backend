@@ -80,10 +80,15 @@ class PersonalityProfileResponse(PersonalityProfileBase):
 class QuestionRequest(BaseModel):
     question: str
 
+class MessageContent(BaseModel):
+    content: str
+    type: str = "text"  # Options: text, thinking, media, etc.
+
 class AnswerResponse(BaseModel):
     question: str
-    answer: str
+    answers: List[MessageContent]  # Multiple messages in the response
     username: str
+    conversation_context: Optional[Dict[str, Any]] = None  # Optional context about the conversation
 
 class UserInfoSchema(BaseModel):
     """Schema for user information."""

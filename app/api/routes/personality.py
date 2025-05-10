@@ -263,7 +263,8 @@ async def ask_question(
     Ask a question to a user and get a response based on their personality profile.
     
     This endpoint uses the user's active personality profile to generate a response
-    that matches their communication style and personality traits.
+    that matches their communication style and personality traits. The response may
+    contain multiple messages to create more engaging and meaningful conversations.
     
     Parameters:
     - username: Username of the user to ask
@@ -299,19 +300,76 @@ async def ask_question(
     
     # Generate response (use cached response if available)
     print(f"Generating response for question: {question.question[:50]}...")
-    answer = await personality_service.generate_response(user.id, question.question, db, log_history=True)
+    answers = await personality_service.generate_response(user.id, question.question, db, log_history=True)
     
-    if not answer:
+    if not answers:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate response"
         )
     
+    # Create conversation context with relevant information
+    conversation_context = {
+        "topic": _detect_topic(question.question),
+        "tone": _detect_tone(question.question),
+        "interests_matched": _find_matching_interests(question.question, profile.traits.get("interests", []))
+    }
+    
     return AnswerResponse(
         question=question.question,
-        answer=answer,
-        username=username
+        answers=answers,
+        username=username,
+        conversation_context=conversation_context
     )
+
+# Helper functions for enhanced conversation context
+def _detect_topic(question: str) -> str:
+    """Detect the general topic of a question."""
+    question_lower = question.lower()
+    if any(word in question_lower for word in ["work", "job", "career", "project", "task"]):
+        return "work"
+    elif any(word in question_lower for word in ["family", "friend", "relationship", "partner"]):
+        return "relationships"
+    elif any(word in question_lower for word in ["hobby", "interest", "fun", "enjoy"]):
+        return "interests"
+    elif any(word in question_lower for word in ["health", "fitness", "exercise", "diet"]):
+        return "health"
+    elif any(word in question_lower for word in ["tech", "technology", "computer", "app", "software"]):
+        return "technology"
+    return "general"
+
+def _detect_tone(question: str) -> str:
+    """Detect the tone of a question."""
+    question_lower = question.lower()
+    if any(word in question_lower for word in ["urgent", "emergency", "critical", "asap"]):
+        return "urgent"
+    elif any(word in question_lower for word in ["sad", "sorry", "upset", "disappointed"]):
+        return "empathetic"
+    elif any(word in question_lower for word in ["excited", "happy", "great", "awesome"]):
+        return "positive"
+    elif any(word in question_lower for word in ["confused", "understand", "unclear", "explain"]):
+        return "explanatory"
+    elif any(word in question_lower for word in ["agree", "disagree", "opinion", "think"]):
+        return "thoughtful"
+    return "neutral"
+
+def _find_matching_interests(question: str, interests: List) -> List[str]:
+    """Find interests from the user's profile that match the question."""
+    if not interests:
+        return []
+    
+    # Convert interests to list if it's a string
+    if isinstance(interests, str):
+        interests = [i.strip() for i in interests.split(',')]
+    
+    question_lower = question.lower()
+    matching = []
+    for interest in interests:
+        if isinstance(interest, str) and interest.lower() in question_lower:
+            matching.append(interest)
+    
+    return matching
+
 @router.post("/email/{email}/ask", response_model=AnswerResponse)
 async def ask_question_by_email(
     email: str, 
@@ -320,28 +378,24 @@ async def ask_question_by_email(
     db: Session = Depends(get_db)
 ):
     """
-    Ask a question to a user identified by email and get a response based on their personality profile.
+    Ask a question to a user by email and get a response based on their personality profile.
     
-    This endpoint finds the user by their unique email address, then uses their active
-    personality profile to generate a response that matches their communication style and personality traits.
+    This endpoint uses the user's active personality profile to generate a response
+    that matches their communication style and personality traits. The response may
+    contain multiple messages to create more engaging and meaningful conversations.
     
     Parameters:
     - email: Email of the user to ask
     - question: Question to ask the user
     - stream: If true, return a streaming response (helpful for longer responses)
     """
-    print(f"Processing question request for email: {email}")
-    
     # Find the user by email
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        print(f"User not found with email: {email}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with email '{email}' not found"
         )
-    
-    print(f"Found user: {user.username} (ID: {user.id})")
     
     # Check if user has an active profile
     profile = db.query(PersonalityProfile).filter(
@@ -350,17 +404,13 @@ async def ask_question_by_email(
     ).first()
     
     if not profile:
-        print(f"No active profile found for user {user.username}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"User doesn't have an active personality profile. Generate one first."
         )
     
-    print(f"Found active profile for user {user.username}")
-    
     # If streaming is requested, use streaming response
     if stream:
-        print(f"Streaming response requested for user {user.username}")
         return StreamingResponse(
             personality_service.generate_response_stream(user.id, question.question, db),
             media_type="application/json"
@@ -368,9 +418,9 @@ async def ask_question_by_email(
     
     # Generate response (use cached response if available)
     print(f"Generating response for question: {question.question[:50]}...")
-    answer = await personality_service.generate_response(user.id, question.question, db, log_history=True)
+    answers = await personality_service.generate_response(user.id, question.question, db, log_history=True)
     
-    if not answer:
+    if not answers:
         print(f"Failed to generate response for user {user.username}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -379,13 +429,21 @@ async def ask_question_by_email(
     
     print(f"Successfully generated response for user {user.username}")
     
+    # Create conversation context with relevant information
+    conversation_context = {
+        "topic": _detect_topic(question.question),
+        "tone": _detect_tone(question.question),
+        "interests_matched": _find_matching_interests(question.question, profile.traits.get("interests", []))
+    }
+    
     # Preload more responses in the background after successful response
     print(f"Adding background task to preload related questions for user {user.username}")
     
     return AnswerResponse(
         question=question.question,
-        answer=answer,
-        username=user.username  # Use username from the user object
+        answers=answers,
+        username=user.username,
+        conversation_context=conversation_context
     )
 
 @router.post("/users/{username}/ask/rag")

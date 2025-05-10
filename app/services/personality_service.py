@@ -208,11 +208,17 @@ class PersonalityService:
             content = content[start:end+1]
         return content
 
-    async def generate_response(self, user_id: int, question: str, db: Session, log_history: bool = True) -> Optional[str]:
+    async def generate_response(self, user_id: int, question: str, db: Session, log_history: bool = True) -> Optional[List[Dict[str, str]]]:
         cache_key = self._get_cache_key(user_id, question)
         cached_response = self._get_from_cache(cache_key)
         if cached_response:
-            return cached_response
+            try:
+                # Try to parse the cached response as JSON for multi-message format
+                return json.loads(cached_response)
+            except:
+                # Fall back to single message format if not JSON
+                return [{"content": cached_response, "type": "text"}]
+                
         # Store the current question in ConversationHistory as a 'user' message
         if log_history:
             print(f"Logging history for user {user_id} and question: {question[:50]}...")
@@ -221,6 +227,7 @@ class PersonalityService:
             db.commit()
         else:
             print(f"Skipping history logging for user {user_id} and question: {question[:50]}...")
+            
         # Fetch recent ingested messages
         recent_messages = (
             db.query(Message)
@@ -229,16 +236,20 @@ class PersonalityService:
             .limit(500)
             .all()
         )
+        
         # Fetch current session's conversation history
         session_history = db.query(ConversationHistory).filter(ConversationHistory.user_id == user_id).order_by(asc(ConversationHistory.created_at)).all()
+        
         user_context = f"\nUser Information:\n"
         user = db.query(User).filter(User.id == user_id).first()
         profile = db.query(PersonalityProfile).filter(
             PersonalityProfile.user_id == user_id,
             PersonalityProfile.is_active == True
         ).first()
+        
         if not user or not profile:
             return None
+            
         user_context += f"- Username: {user.username}\n"
         if hasattr(user, 'email') and user.email:
             user_context += f"- Email: {user.email}\n"
@@ -248,41 +259,74 @@ class PersonalityService:
             user_context += f"- Member since: {user.created_at.strftime('%Y-%m-%d')}\n"
         if hasattr(profile, 'message_count') and profile.message_count:
             user_context += f"- Total messages: {profile.message_count}\n"
+            
         conversation_history = ""
         if recent_messages:
             conversation_history = "\nRecent ingested conversation history:\n"
             for msg in reversed(recent_messages):
                 timestamp = f" ({msg.created_at.strftime('%Y-%m-%d %H:%M')})" if hasattr(msg, 'created_at') and msg.created_at else ""
                 conversation_history += f"- {msg.content}{timestamp}\n"
+                
         session_history_str = ""
         if session_history:
             session_history_str = "\nCurrent session conversation history:\n"
             for entry in session_history:
                 role = "You" if entry.role == "user" else "AI"
                 session_history_str += f"- {role}: {entry.content}\n"
+                
         # Explicitly include the current question in the prompt context
         current_question_context = f"\nCurrent question: {question}\n"
+        
         system_prompt = self._enhance_system_prompt_for_question(
             profile.system_prompt + user_context + conversation_history + session_history_str + current_question_context,
             user.username,
             question
         )
+        
         print(f"Enhanced system prompt: {system_prompt}...")
+        
         chat_messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": question}
         ]
+        
         try:
-            result = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False)
+            result = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False, format_json=True)
+            
             if "message" in result and "content" in result["message"]:
                 response_content = result["message"]["content"]
-                self._add_to_cache(self._get_cache_key(user_id, question), response_content)
-                # Store the AI's answer in ConversationHistory
-                if log_history:
-                    ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=response_content)
-                    db.add(ai_history_entry)
-                    db.commit()
-                return response_content
+                
+                # Try to parse the response as JSON for multi-message format
+                try:
+                    response_messages = json.loads(response_content)
+                    if isinstance(response_messages, list):
+                        for message in response_messages:
+                            # Add default type if missing
+                            if "type" not in message:
+                                message["type"] = "text"
+                        
+                        # Store each message in ConversationHistory
+                        if log_history:
+                            for message in response_messages:
+                                ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=message["content"])
+                                db.add(ai_history_entry)
+                            db.commit()
+                            
+                        self._add_to_cache(self._get_cache_key(user_id, question), response_content)
+                        return response_messages
+                except json.JSONDecodeError:
+                    # Fall back to single message format if not JSON
+                    single_message = [{"content": response_content, "type": "text"}]
+                    
+                    # Store the AI's answer in ConversationHistory
+                    if log_history:
+                        ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=response_content)
+                        db.add(ai_history_entry)
+                        db.commit()
+                        
+                    self._add_to_cache(self._get_cache_key(user_id, question), json.dumps(single_message))
+                    return single_message
+                    
             return None
         except Exception as e:
             print(f"Exception when calling model provider for user {user.username}: {str(e)}")
@@ -432,12 +476,23 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
         cached_response = self._get_from_cache(cache_key)
         if cached_response:
             print(f"Cache hit for user {user_id} and question: {question[:30]}...")
-            yield json.dumps({
-                "type": "cached",
-                "content": cached_response,
-                "done": True
-            }) + "\n"
+            try:
+                # Try to parse cached response as JSON for multi-message format
+                messages = json.loads(cached_response)
+                yield json.dumps({
+                    "type": "cached",
+                    "content": messages,
+                    "done": True
+                }) + "\n"
+            except:
+                # Fall back to single message format
+                yield json.dumps({
+                    "type": "cached",
+                    "content": [{"content": cached_response, "type": "text"}],
+                    "done": True
+                }) + "\n"
             return
+            
         profile = db.query(PersonalityProfile).filter(
             PersonalityProfile.user_id == user_id,
             PersonalityProfile.is_active == True
@@ -448,6 +503,7 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
                 "done": True
             }) + "\n"
             return
+            
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             yield json.dumps({
@@ -455,6 +511,13 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
                 "done": True
             }) + "\n"
             return
+            
+        # Log user message in history
+        user_history_entry = ConversationHistory(user_id=user_id, role='user', content=question)
+        db.add(user_history_entry)
+        db.commit()
+        
+        # Build context the same way as in generate_response
         recent_messages = (
             db.query(Message)
             .filter(Message.user_id == user_id)
@@ -462,22 +525,50 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             .limit(50)
             .all()
         )
+        
+        # Fetch current session's conversation history
+        session_history = db.query(ConversationHistory).filter(
+            ConversationHistory.user_id == user_id
+        ).order_by(asc(ConversationHistory.created_at)).all()
+        
+        user_context = f"\nUser Information:\n"
+        user_context += f"- Username: {user.username}\n"
+        if hasattr(user, 'email') and user.email:
+            user_context += f"- Email: {user.email}\n"
+        if hasattr(user, 'full_name') and user.full_name:
+            user_context += f"- Full Name: {user.full_name}\n"
+        
         conversation_history = ""
         if recent_messages:
             conversation_history = "\nRecent conversation history:\n"
             for msg in reversed(recent_messages):
                 conversation_history += f"- {msg.content}\n"
+                
+        session_history_str = ""
+        if session_history:
+            session_history_str = "\nCurrent session conversation history:\n"
+            for entry in session_history:
+                role = "User" if entry.role == "user" else "AI"
+                session_history_str += f"- {role}: {entry.content}\n"
+                
         system_prompt = self._enhance_system_prompt_for_question(
-            profile.system_prompt + conversation_history, 
+            profile.system_prompt + user_context + conversation_history + session_history_str, 
             user.username, 
             question
         )
+        
         chat_messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": question}
         ]
+        
         try:
-            full_response = ""
+            raw_response = ""
+            current_message = {"content": "", "type": "text"} 
+            messages_stack = []
+            is_json_array = False
+            json_collection_mode = False
+            
             async with model_provider.generate_chat(chat_messages, system_prompt=None, stream=True, format_json=True) as response:
                 async for line in response:
                     if line.strip():
@@ -486,21 +577,87 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
                             if "message" in chunk and "content" in chunk["message"]:
                                 content = chunk["message"]["content"]
                                 if content:
-                                    full_response += content
-                                    yield json.dumps({
-                                        "type": "token",
-                                        "content": content,
-                                        "done": False
-                                    }) + "\n"
+                                    raw_response += content
+                                    
+                                    # Check if we're starting JSON array collection
+                                    if content.strip().startswith("[") and not json_collection_mode:
+                                        json_collection_mode = True
+                                        is_json_array = True
+                                    
+                                    if json_collection_mode:
+                                        # Just accumulate for later parsing
+                                        yield json.dumps({
+                                            "type": "token",
+                                            "content": content,
+                                            "done": False
+                                        }) + "\n"
+                                    else:
+                                        # Normal text streaming - accumulate in current_message
+                                        current_message["content"] += content
+                                        yield json.dumps({
+                                            "type": "token",
+                                            "content": content,
+                                            "done": False
+                                        }) + "\n"
                         except json.JSONDecodeError:
                             pass
-            yield json.dumps({
-                "type": "complete",
-                "content": full_response,
-                "done": True
-            }) + "\n"
-            if full_response:
-                self._add_to_cache(cache_key, full_response)
+            
+            # Process the final response
+            if json_collection_mode:
+                try:
+                    # Try to parse the entire response as a JSON array
+                    messages = json.loads(raw_response)
+                    if isinstance(messages, list):
+                        # Add default type if missing
+                        for message in messages:
+                            if "type" not in message:
+                                message["type"] = "text"
+                        
+                        # Store each message in conversation history
+                        for message in messages:
+                            ai_history_entry = ConversationHistory(
+                                user_id=user_id, 
+                                role='ai', 
+                                content=message["content"]
+                            )
+                            db.add(ai_history_entry)
+                        db.commit()
+                        
+                        # Cache and return the parsed messages
+                        self._add_to_cache(cache_key, raw_response)
+                        yield json.dumps({
+                            "type": "complete",
+                            "content": messages,
+                            "done": True
+                        }) + "\n"
+                        return
+                except:
+                    # If JSON parsing fails, fall back to treating it as plain text
+                    json_collection_mode = False
+                    
+            if not json_collection_mode:
+                # Single message mode - finalize the message we've been building
+                if raw_response:
+                    # Create a single message
+                    message = {"content": raw_response, "type": "text"}
+                    messages = [message]
+                    
+                    # Store in conversation history
+                    ai_history_entry = ConversationHistory(
+                        user_id=user_id, 
+                        role='ai', 
+                        content=raw_response
+                    )
+                    db.add(ai_history_entry)
+                    db.commit()
+                    
+                    # Cache the message as JSON array
+                    self._add_to_cache(cache_key, json.dumps(messages))
+                    yield json.dumps({
+                        "type": "complete",
+                        "content": messages,
+                        "done": True
+                    }) + "\n"
         except Exception as e:
             print(f"Exception when streaming response: {str(e)}")
             yield json.dumps({
