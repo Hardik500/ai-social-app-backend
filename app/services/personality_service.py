@@ -119,26 +119,34 @@ class PersonalityService:
         )
         embedding_task = asyncio.create_task(embedding_service.generate_embedding(description))
         embedding = await embedding_task
-        new_profile = PersonalityProfile(
-            user_id=user_id,
-            traits=traits_and_description,
-            description=description,
-            embedding=embedding,
-            message_count=message_count,
-            system_prompt=system_prompt,
-            is_active=True,
-            last_message_id=max(msg.id for msg in messages) if messages else None
-        )
-        existing_profiles = db.query(PersonalityProfile).filter(
-            PersonalityProfile.user_id == user_id,
-            PersonalityProfile.is_active == True
-        ).all()
-        for profile in existing_profiles:
-            profile.is_active = False
-        db.add(new_profile)
-        db.commit()
-        db.refresh(new_profile)
-        return new_profile
+        if existing_profile:
+            # Update the existing profile in place
+            existing_profile.traits = traits_and_description
+            existing_profile.description = description
+            existing_profile.embedding = embedding
+            existing_profile.message_count = message_count
+            existing_profile.system_prompt = system_prompt
+            existing_profile.is_active = True
+            existing_profile.last_message_id = max(msg.id for msg in messages) if messages else None
+            db.commit()
+            db.refresh(existing_profile)
+            return existing_profile
+        else:
+            # If no existing profile, create a new one
+            new_profile = PersonalityProfile(
+                user_id=user_id,
+                traits=traits_and_description,
+                description=description,
+                embedding=embedding,
+                message_count=message_count,
+                system_prompt=system_prompt,
+                is_active=True,
+                last_message_id=max(msg.id for msg in messages) if messages else None
+            )
+            db.add(new_profile)
+            db.commit()
+            db.refresh(new_profile)
+            return new_profile
 
     async def _generate_analysis(self, messages: List[str], system_prompt: str) -> Optional[Dict[str, Any]]:
         max_messages_per_request = 50
