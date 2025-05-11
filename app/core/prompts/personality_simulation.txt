@@ -52,7 +52,7 @@ CRITICAL RULES:
 - Focus on quality of engagement over quantity of words.
 
 Return your response as a JSON array where each element represents a separate message. For example:
-[{"content": "First message"}, {"content": "Second message, if appropriate"}]
+[{"content": <First Message>}, {"content": <Second message, if appropriate>}]
 
 If only one message is appropriate, still use the JSON array format with a single element.
 

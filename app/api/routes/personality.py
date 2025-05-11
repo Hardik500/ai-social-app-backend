@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -358,7 +359,7 @@ async def _handle_question_request(
         previous_exchanges=previous_exchanges,
         preferred_communication_style=preferred_communication_style
     )
-    print(f"Validation result for user {user.username}, answer: {answers}: {validation_result}")
+    print(f"Validation result for user {user.username}, answer: {answers}: {json.dumps(vars(validation_result), indent=2)}")
 
     # If the answer is incomplete/invalid, regenerate once
     if not validation_result.is_valid:

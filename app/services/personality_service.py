@@ -295,43 +295,41 @@ class PersonalityService:
         ]
         
         try:
-            result = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False, format_json=True)
+            # Only use format_json when multi_message is True
+            result = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False, format_json=multi_message)
             
             if "message" in result and "content" in result["message"]:
                 response_content = result["message"]["content"]
                 
-                # Try to parse the response as JSON for multi-message format
-                try:
-                    response_messages = json.loads(response_content)
-                    if isinstance(response_messages, list):
-                        for message in response_messages:
-                            # Add default type if missing
-                            if "type" not in message:
-                                message["type"] = "text"
-                        
-                        # Store each message in ConversationHistory
-                        if log_history:
+                # If the response looks like a JSON array, parse it and return as a list of messages
+                if response_content.strip().startswith("[") and response_content.strip().endswith("]"):
+                    try:
+                        response_messages = json.loads(response_content)
+                        if isinstance(response_messages, list):
                             for message in response_messages:
-                                ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=message["content"])
-                                db.add(ai_history_entry)
-                            db.commit()
-                            
-                        self._add_to_cache(self._get_cache_key(user_id, question), response_content)
-                        return response_messages
-                except json.JSONDecodeError:
-                    # Fall back to single message format if not JSON
-                    single_message = [{"content": response_content, "type": "text"}]
+                                if "type" not in message:
+                                    message["type"] = "text"
+                            # Store each message in ConversationHistory
+                            if log_history:
+                                for message in response_messages:
+                                    ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=message["content"])
+                                    db.add(ai_history_entry)
+                                db.commit()
+                            self._add_to_cache(self._get_cache_key(user_id, question), response_content)
+                            return response_messages
+                    except Exception:
+                        pass
+                
+                # Otherwise, treat as a single message
+                single_message = [{"content": response_content, "type": "text"}]
+                # Store the AI's answer in ConversationHistory
+                if log_history:
+                    ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=response_content)
+                    db.add(ai_history_entry)
+                    db.commit()
+                self._add_to_cache(self._get_cache_key(user_id, question), json.dumps(single_message))
+                return single_message
                     
-                    # Store the AI's answer in ConversationHistory
-                    if log_history:
-                        ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=response_content)
-                        db.add(ai_history_entry)
-                        db.commit()
-                        
-                    self._add_to_cache(self._get_cache_key(user_id, question), json.dumps(single_message))
-                    return single_message
-                    
-            return None
         except Exception as e:
             print(f"Exception when calling model provider for user {user.username}: {str(e)}")
             return None

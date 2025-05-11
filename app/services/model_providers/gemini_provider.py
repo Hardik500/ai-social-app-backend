@@ -37,7 +37,18 @@ class GeminiProvider:
                 )
                 return response
             response = await loop.run_in_executor(None, call)
-            return {"message": {"content": response.text}}
+            text = response.text.strip()
+            # If the model output is a JSON array string, parse it and return as list of messages
+            if text.startswith("[") and text.endswith("]"):
+                try:
+                    parsed = json.loads(text)
+                    # If it's a list of dicts with 'content', return as is
+                    if isinstance(parsed, list) and all(isinstance(m, dict) and 'content' in m for m in parsed):
+                        return {"message": {"content": json.dumps(parsed)}}
+                except Exception:
+                    pass
+            # Otherwise, return as a single message
+            return {"message": {"content": text}}
 
     async def generate_embedding(self, text):
         loop = asyncio.get_event_loop()
