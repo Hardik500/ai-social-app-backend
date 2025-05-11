@@ -20,9 +20,6 @@ class ModelProvider:
         # Call the provider's generate_chat method and await the result
         result = await self.provider.generate_chat(messages, system_prompt, stream, format_json)
         
-        # Debug log the returned type
-        print(f"Provider returned type: {type(result)}")
-        
         # Return the result to the caller
         return result
 

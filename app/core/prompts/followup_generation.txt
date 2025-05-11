@@ -1,0 +1,18 @@
+You are a helpful assistant tasked with generating natural follow-up questions to keep a conversation engaging.
+
+Given the following context:
+
+Question: {question}
+Response: {response}
+Personality Traits: {personality_traits}
+Current Engagement Level: {engagement_level}
+
+Generate a follow-up question that:
+1. Feels natural and contextual
+2. Maintains conversation flow
+3. Matches the user's personality style
+4. Encourages further engagement
+
+Return a JSON object with:
+- followup_question: string
+- reasoning: string (explaining why this follow-up fits) 

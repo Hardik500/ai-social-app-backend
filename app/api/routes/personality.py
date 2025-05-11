@@ -14,6 +14,7 @@ from app.models.schemas import PersonalityProfileResponse, QuestionRequest, Answ
 from app.services.personality_service import personality_service
 from app.services.embedding_service import embedding_service
 from app.models.conversation import Message
+from app.services.response_validator import response_validator
 
 router = APIRouter(
     prefix="/personalities",
@@ -321,13 +322,75 @@ async def _handle_question_request(
             detail=f"Failed to generate response"
         )
     
-    print(f"Successfully generated response for user {user.username}")
-    
+    print(f"Successfully generated response for user {user.username}, answer: {answers}")
+
+    print(f"Validating response for user {user.username}, answer: {answers}")
+    validation_result = await response_validator.validate_response(
+        question=question.question,
+        response=answers[0]["content"],
+        personality_context={
+            "traits": profile.traits,
+            "communication_style": profile.traits.get("communication_style", {}),
+            "interests": profile.traits.get("interests", [])
+        }
+    )
+    print(f"Validation result for user {user.username}, answer: {answers}: {validation_result}")
+
+    # If the answer is incomplete/invalid, regenerate once
+    if not validation_result.is_valid:
+        print(f"Regenerating answer for user {user.username} due to validation failure, answer: {answers}...")
+        answers = await personality_service.generate_response(
+            user.id,
+            question.question,
+            db,
+            log_history=True,
+            multi_message=use_multi_message
+        )
+        if not answers:
+            print(f"Failed to regenerate response for user {user.username}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to generate valid response after retry"
+            )
+        print(f"Re-validating regenerated response for user {user.username}, answer: {answers}...")
+        validation_result = await response_validator.validate_response(
+            question=question.question,
+            response=answers[0]["content"],
+            personality_context={
+                "traits": profile.traits,
+                "communication_style": profile.traits.get("communication_style", {}),
+                "interests": profile.traits.get("interests", [])
+            }
+        )
+        print(f"Validation result after regeneration for user {user.username}, answer: {answers}: {validation_result}")
+
+    print(f"Generating follow-up for user {user.username}, answer: {answers}...")
+    followup = None
+    if validation_result.is_valid and validation_result.needs_followup:
+        followup = await response_validator.generate_followup(
+            question=question.question,
+            response=answers[0]["content"],
+            personality_traits=profile.traits,
+            engagement_level=validation_result.engagement_level
+        )
+        if followup and followup.get("followup_question"):
+            answers.append({
+                "content": followup["followup_question"],
+                "type": "followup",
+                "reasoning": followup.get("reasoning")
+            })
+    print(f"Followup generated for user {user.username}: {followup}")
+
     # Create conversation context with relevant information
     conversation_context = {
         "topic": _detect_topic(question.question),
         "tone": _detect_tone(question.question),
-        "interests_matched": _find_matching_interests(question.question, profile.traits.get("interests", []))
+        "interests_matched": _find_matching_interests(question.question, profile.traits.get("interests", [])),
+        "validation": {
+            "score": validation_result.score,
+            "engagement_level": validation_result.engagement_level,
+            "issues": validation_result.issues
+        }
     }
     
     return AnswerResponse(

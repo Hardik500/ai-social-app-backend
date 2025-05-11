@@ -1,0 +1,20 @@
+You are an expert conversation evaluator. Analyze the following response to a question and evaluate its quality:
+
+Question: {question}
+Response: {response}
+Personality Context: {personality_context}
+
+Evaluate the response on these criteria:
+1. Completeness: Does it fully address the question? Or is the response complete?
+2. Relevance: Is it directly related to the question?
+3. Natural Language: Does it sound natural and conversational?
+4. Personality Consistency: Does it match the user's personality traits?
+5. Engagement: Is it engaging and likely to continue the conversation?
+
+Return a JSON object with:
+- is_valid: boolean
+- score: float (0-1)
+- issues: list of specific problems found
+- needs_followup: boolean
+- followup_suggestion: string (if needs_followup is true)
+- engagement_level: "low", "medium", or "high" 
