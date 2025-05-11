@@ -347,10 +347,12 @@ async def _handle_question_request(
     if not preferred_communication_style and hasattr(profile, "description"):
         preferred_communication_style = profile.description
 
+    # Join all answer contents for validation (handles both single and multi-message)
+    response_text = " ".join([a["content"] for a in answers])
     print(f"Validating response for user {user.username}, answer: {answers}")
     validation_result = await response_validator.validate_response(
         question=question.question,
-        response=answers[0]["content"],
+        response=response_text,
         personality_context={
             "traits": profile.traits,
             "communication_style": profile.traits.get("communication_style", {}),
@@ -380,7 +382,7 @@ async def _handle_question_request(
         print(f"Re-validating regenerated response for user {user.username}, answer: {answers}...")
         validation_result = await response_validator.validate_response(
             question=question.question,
-            response=answers[0]["content"],
+            response=response_text,
             personality_context={
                 "traits": profile.traits,
                 "communication_style": profile.traits.get("communication_style", {}),
@@ -396,7 +398,7 @@ async def _handle_question_request(
     if validation_result.is_valid and validation_result.needs_followup:
         followup = await response_validator.generate_followup(
             question=question.question,
-            response=answers[0]["content"],
+            response=response_text,
             personality_traits=profile.traits,
             engagement_level=validation_result.engagement_level,
             previous_exchanges=previous_exchanges,
