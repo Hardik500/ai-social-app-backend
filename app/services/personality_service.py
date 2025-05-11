@@ -15,6 +15,7 @@ from app.services.embedding_service import embedding_service
 from app.core.prompt_manager import prompt_manager
 from app.services.model_provider import model_provider
 import re
+import dateutil.parser
 
 class PersonalityService:
     def __init__(self):
@@ -240,7 +241,7 @@ class PersonalityService:
         recent_messages = (
             db.query(Message)
             .filter(Message.user_id == user_id)
-            .order_by(Message.created_at.desc())
+            .order_by(Message.timestamp.desc())
             .limit(500)
             .all()
         )
@@ -272,7 +273,15 @@ class PersonalityService:
         if recent_messages:
             conversation_history = "\nRecent ingested conversation history:\n"
             for msg in reversed(recent_messages):
-                timestamp = f" ({msg.created_at.strftime('%Y-%m-%d %H:%M')})" if hasattr(msg, 'created_at') and msg.created_at else ""
+                timestamp = ""
+                if hasattr(msg, 'timestamp') and msg.timestamp:
+                    try:
+                        ts = msg.timestamp
+                        if isinstance(ts, str):
+                            ts = dateutil.parser.parse(ts)
+                        timestamp = f" ({ts.strftime('%Y-%m-%d %H:%M')})"
+                    except Exception:
+                        timestamp = ""
                 conversation_history += f"- {msg.content}{timestamp}\n"
                 
         session_history_str = ""
@@ -280,7 +289,8 @@ class PersonalityService:
             session_history_str = "\nCurrent session conversation history:\n"
             for entry in session_history:
                 role = "You" if entry.role == "user" else "AI"
-                session_history_str += f"- {role}: {entry.content}\n"
+                timestamp = f" ({entry.created_at.strftime('%Y-%m-%d %H:%M')})" if hasattr(entry, 'created_at') and entry.created_at else ""
+                session_history_str += f"- {role}: {entry.content}{timestamp}\n"
                 
         # Explicitly include the current question in the prompt context
         current_question_context = f"\nCurrent question: {question}\n"
@@ -531,7 +541,7 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
         recent_messages = (
             db.query(Message)
             .filter(Message.user_id == user_id)
-            .order_by(Message.created_at.desc())
+            .order_by(Message.timestamp.desc())
             .limit(50)
             .all()
         )
@@ -559,7 +569,8 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             session_history_str = "\nCurrent session conversation history:\n"
             for entry in session_history:
                 role = "User" if entry.role == "user" else "AI"
-                session_history_str += f"- {role}: {entry.content}\n"
+                timestamp = f" ({entry.created_at.strftime('%Y-%m-%d %H:%M')})" if hasattr(entry, 'created_at') and entry.created_at else ""
+                session_history_str += f"- {role}: {entry.content}{timestamp}\n"
                 
         system_prompt = self._enhance_system_prompt_for_question(
             profile.system_prompt + user_context + conversation_history + session_history_str, 
@@ -1023,8 +1034,8 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
         This implementation simply picks the most recent messages.
         """
         # Sort messages by created_at if available, else by id
-        if hasattr(messages[0], 'created_at'):
-            sorted_msgs = sorted(messages, key=lambda m: m.created_at, reverse=True)
+        if hasattr(messages[0], 'timestamp'):
+            sorted_msgs = sorted(messages, key=lambda m: m.timestamp, reverse=True)
         else:
             sorted_msgs = sorted(messages, key=lambda m: m.id, reverse=True)
         return sorted_msgs[:max_count]
