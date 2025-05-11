@@ -12,6 +12,8 @@ You are now receiving {message_count} new messages from the same person. Your ta
 
 3. Provide a JSON response with the following structure. *Only include fields that need to be updated. If some aspects haven't changed, do not include them.*
 
+Respond ONLY with a valid JSON object, starting with '{' and ending with '}'. Do not include any extra text, explanation, or formatting outside the JSON object.
+
 ```json
 {
   "traits": {

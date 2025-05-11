@@ -694,12 +694,35 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             message_count=len(new_messages)
         )
         traits_delta = await self._generate_analysis(message_texts, formatted_prompt)
+        # Defensive: If traits_delta is not a dict, try to extract JSON and parse again
         if not isinstance(traits_delta, dict):
             print(f"traits_delta is not a dict: {traits_delta}")
-            print(f"Failed to generate incremental analysis, falling back to full profile generation")
-            existing_profile.is_active = False
-            db.commit()
-            return await self.generate_profile(user_id, db)
+            # Try to extract JSON if traits_delta is a string
+            if isinstance(traits_delta, str):
+                from .personality_service import PersonalityService  # Avoid circular import
+                try:
+                    json_str = self.extract_json_from_response(traits_delta)
+                    parsed = json.loads(json_str)
+                    if isinstance(parsed, dict):
+                        traits_delta = parsed
+                    else:
+                        print(f"Parsed content is not a dict: {parsed}")
+                        print(f"Failed to generate incremental analysis, falling back to full profile generation")
+                        existing_profile.is_active = False
+                        db.commit()
+                        return await self.generate_profile(user_id, db)
+                except Exception as e:
+                    print(f"Error during defensive JSON extraction: {e}")
+                    print(f"Raw response: {traits_delta}")
+                    print(f"Failed to generate incremental analysis, falling back to full profile generation")
+                    existing_profile.is_active = False
+                    db.commit()
+                    return await self.generate_profile(user_id, db)
+            else:
+                print(f"Failed to generate incremental analysis, falling back to full profile generation")
+                existing_profile.is_active = False
+                db.commit()
+                return await self.generate_profile(user_id, db)
         updated_traits = self._merge_traits(existing_traits, traits_delta)
         latest_message_id = max(msg.id for msg in new_messages) if new_messages else existing_profile.last_message_id
         total_message_count = existing_profile.message_count + len(new_messages)
