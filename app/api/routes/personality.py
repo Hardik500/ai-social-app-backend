@@ -324,6 +324,28 @@ async def _handle_question_request(
     
     print(f"Successfully generated response for user {user.username}, answer: {answers}")
 
+    # Extract previous exchanges (last 5 conversation history entries for this user)
+    previous_exchanges = []
+    history_entries = db.query(Message).filter(Message.user_id == user.id).order_by(Message.created_at.desc()).limit(5).all()
+    for entry in reversed(history_entries):
+        previous_exchanges.append({
+            "role": "user" if entry.user_id == user.id else "ai",
+            "content": entry.content,
+            "timestamp": str(entry.created_at)
+        })
+
+    # Extract preferred communication style if available
+    preferred_communication_style = None
+    if profile.traits and isinstance(profile.traits, dict):
+        comm_style = profile.traits.get("communication_style")
+        if isinstance(comm_style, str):
+            preferred_communication_style = comm_style
+        elif isinstance(comm_style, dict):
+            # Join dict values for a summary
+            preferred_communication_style = ", ".join(f"{k}: {v}" for k, v in comm_style.items())
+    if not preferred_communication_style and hasattr(profile, "description"):
+        preferred_communication_style = profile.description
+
     print(f"Validating response for user {user.username}, answer: {answers}")
     validation_result = await response_validator.validate_response(
         question=question.question,
@@ -332,7 +354,9 @@ async def _handle_question_request(
             "traits": profile.traits,
             "communication_style": profile.traits.get("communication_style", {}),
             "interests": profile.traits.get("interests", [])
-        }
+        },
+        previous_exchanges=previous_exchanges,
+        preferred_communication_style=preferred_communication_style
     )
     print(f"Validation result for user {user.username}, answer: {answers}: {validation_result}")
 
@@ -360,7 +384,9 @@ async def _handle_question_request(
                 "traits": profile.traits,
                 "communication_style": profile.traits.get("communication_style", {}),
                 "interests": profile.traits.get("interests", [])
-            }
+            },
+            previous_exchanges=previous_exchanges,
+            preferred_communication_style=preferred_communication_style
         )
         print(f"Validation result after regeneration for user {user.username}, answer: {answers}: {validation_result}")
 
@@ -371,7 +397,9 @@ async def _handle_question_request(
             question=question.question,
             response=answers[0]["content"],
             personality_traits=profile.traits,
-            engagement_level=validation_result.engagement_level
+            engagement_level=validation_result.engagement_level,
+            previous_exchanges=previous_exchanges,
+            preferred_communication_style=preferred_communication_style
         )
         if followup and followup.get("followup_question"):
             answers.append({

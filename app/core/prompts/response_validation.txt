@@ -1,20 +1,107 @@
-You are an expert conversation evaluator. Analyze the following response to a question and evaluate its quality:
+**Improved Response Validation Prompt**
 
-Question: {question}
-Response: {response}
-Personality Context: {personality_context}
+---
 
-Evaluate the response on these criteria:
-1. Completeness: Does it fully address the question? Or is the response complete?
-2. Relevance: Is it directly related to the question?
-3. Natural Language: Does it sound natural and conversational?
-4. Personality Consistency: Does it match the user's personality traits?
-5. Engagement: Is it engaging and likely to continue the conversation?
+You are an expert conversation evaluator. Analyze the following response to a question and thoroughly evaluate its quality:
 
-Return a JSON object with:
-- is_valid: boolean
-- score: float (0-1)
-- issues: list of specific problems found
-- needs_followup: boolean
-- followup_suggestion: string (if needs_followup is true)
-- engagement_level: "low", "medium", or "high" 
+**Inputs:**
+- **Question:** {question}
+- **Response:** {response}
+- **Personality Context:** {personality_context}  
+  (Include user's personality traits and preferred communication style if available.)
+- **Previous Exchanges:** {previous_exchanges}
+
+---
+
+**Evaluation Criteria:**
+
+1. **Completeness:** Does the response fully address every aspect of the question?
+2. **Relevance:** Is it directly and specifically related to the question asked?
+3. **Natural Language:** Is the response conversational and easy to read (not robotic or awkward)?
+4. **Personality Consistency:** Does it reflect and align with the user's personality traits and communication style?
+   - *Example: For "enthusiastic" users, include energetic language; for "analytical," focus on clarity and depth.*
+5. **Engagement:** Is the response likely to encourage further interaction? Does it prompt or invite continued conversation?
+
+**Scoring Instructions:**
+- For each criterion, assign a value between 0 (poor) and 1 (excellent).
+- The **overall score** is the average of these five values, rounded to two decimal places.
+
+**Engagement Level Measurement:**
+- *Low*: Response is brief, closed, or unlikely to prompt further engagement.
+- *Medium*: Response is somewhat interactive but may lack explicit follow-up or personal touch.
+- *High*: Response is lively, open-ended, and strongly encourages continued conversation.
+
+**Instructions for Edge Cases:**
+- If the response is ambiguous, off-topic, or does not answer the question, note this in `issues` and assign a low score.
+- If personality context is unclear, use a neutral style for your assessment.
+- If multiple personality traits are present, select the dominant one or aim for a balanced judgment.
+
+---
+
+**Output Format:**
+
+Return a JSON object structured like this:
+
+```json
+{{
+  "is_valid": boolean,          // true if the response meets basic standards for all criteria (each criterion >= 0.5)
+  "score": float,               // average of the five criteria (0-1)
+  "criteria_scores": {{
+    "completeness": float,      // individual criterion score (0-1)
+    "relevance": float,
+    "natural_language": float,
+    "personality_consistency": float,
+    "engagement": float
+  }},
+  "issues": [                   // list of specific, constructive issues with references to criteria
+    "The response is somewhat generic and does not reflect the user's analytical style."
+  ],
+  "needs_followup": boolean,    // true if the response leaves the conversation hanging, unanswered, or incomplete
+  "followup_suggestion": "string or empty",   // If needs_followup is true, propose a concise follow-up prompt
+  "engagement_level": "low" | "medium" | "high"     // Based on the engagement definition above
+}}
+```
+
+---
+
+**Example:**
+
+```json
+{{
+  "is_valid": false,
+  "score": 0.42,
+  "criteria_scores": {{
+    "completeness": 0.4,
+    "relevance": 0.8,
+    "natural_language": 0.5,
+    "personality_consistency": 0.2,
+    "engagement": 0.2
+  }},
+  "issues": [
+    "The response does not address all parts of the question.",
+    "Language is somewhat stiff and impersonal.",
+    "Lacks clear adaptation to user's 'enthusiastic' personality."
+  ],
+  "needs_followup": true,
+  "followup_suggestion": "Would you like to share more about why this topic interests you?",
+  "engagement_level": "low"
+}}
+```
+
+---
+
+**Additional Guidance:**
+- Phrase feedback constructively, linking each issue to a criterion.
+- When in doubt, err on the side of specificity in your feedback.
+- Always make a follow-up suggestion if you flag that one is needed.
+
+---
+
+**Summary of Improvements Added:**
+
+- Defined scoring and aggregation methodology.
+- Explained what constitutes low, medium, and high engagement.
+- Gave explicit guidance for using personality context.
+- Provided sample JSON output.
+- Clarified edge-case and ambiguous cases handling.
+- Encouraged constructive, actionable feedback.

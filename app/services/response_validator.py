@@ -24,12 +24,14 @@ class ValidationResult:
         )
 
 class ResponseValidator:
-    async def validate_response(self, question: str, response: str, personality_context: Dict[str, Any]) -> ValidationResult:
+    async def validate_response(self, question: str, response: str, personality_context: Dict[str, Any], previous_exchanges: Optional[List[Dict[str, str]]] = None, preferred_communication_style: Optional[str] = None) -> ValidationResult:
         prompt = prompt_manager.format_template(
             "response_validation",
             question=question,
             response=response,
-            personality_context=json.dumps(personality_context)
+            personality_context=json.dumps(personality_context),
+            previous_exchanges=json.dumps(previous_exchanges) if previous_exchanges else "",
+            preferred_communication_style=preferred_communication_style or ""
         )
         result = await model_provider.generate_chat(
             [{"role": "system", "content": prompt}],
@@ -47,13 +49,15 @@ class ResponseValidator:
                 return ValidationResult(False, 0.0, [f"Parsing error: {str(e)}"], False, None, "low")
         return ValidationResult(False, 0.0, ["No response from model"], False, None, "low")
 
-    async def generate_followup(self, question: str, response: str, personality_traits: Dict[str, Any], engagement_level: str) -> Dict[str, str]:
+    async def generate_followup(self, question: str, response: str, personality_traits: Dict[str, Any], engagement_level: str, previous_exchanges: Optional[List[Dict[str, str]]] = None, preferred_communication_style: Optional[str] = None) -> Dict[str, str]:
         prompt = prompt_manager.format_template(
             "followup_generation",
             question=question,
             response=response,
             personality_traits=json.dumps(personality_traits),
-            engagement_level=engagement_level
+            engagement_level=engagement_level,
+            previous_exchanges=json.dumps(previous_exchanges) if previous_exchanges else "",
+            preferred_communication_style=preferred_communication_style or ""
         )
         result = await model_provider.generate_chat(
             [{"role": "system", "content": prompt}],
