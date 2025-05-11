@@ -202,19 +202,62 @@ class PersonalityService:
 
     def extract_json_from_response(self, content: str) -> str:
         """
-        Extract the first valid JSON object from a string, removing code fences and extra text.
+        Extract valid JSON (object or array) from a string, removing code fences and extra text.
+        Handles both object ({}) and array ([]) formats.
         """
+        if not content:
+            return content
+            
         content = content.strip()
+        
         # Remove ```json or ``` at the start
-        content = re.sub(r"^```json", "", content, flags=re.IGNORECASE).strip()
-        content = re.sub(r"^```", "", content).strip()
+        if content.startswith("```json"):
+            content = content[7:].strip()
+        elif content.startswith("```"):
+            content = content[3:].strip()
+            
         # Remove trailing ```
-        content = re.sub(r"```$", "", content).strip()
-        # Find the first { and last } to extract the JSON object
-        start = content.find("{")
-        end = content.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            content = content[start:end+1]
+        if content.endswith("```"):
+            content = content[:-3].strip()
+            
+        # First attempt: Find both array and object patterns
+        if '[' in content and ']' in content:
+            # Try to extract array
+            array_start = content.find("[")
+            array_end = content.rfind("]")
+            if array_start != -1 and array_end != -1 and array_end > array_start:
+                potential_array = content[array_start:array_end+1]
+                try:
+                    # Verify it's valid JSON
+                    json.loads(potential_array)
+                    return potential_array
+                except json.JSONDecodeError:
+                    # If it fails, continue to object extraction
+                    pass
+        
+        # Fallback to object extraction
+        object_start = content.find("{")
+        object_end = content.rfind("}")
+        if object_start != -1 and object_end != -1 and object_end > object_start:
+            return content[object_start:object_end+1]
+            
+        # If no valid JSON structure found, try cleaning the content further
+        cleaned_content = re.sub(r'\s+', ' ', content).strip()
+        
+        # Try again with cleaned content
+        if '[' in cleaned_content:
+            array_start = cleaned_content.find("[")
+            array_end = cleaned_content.rfind("]")
+            if array_start != -1 and array_end != -1 and array_end > array_start:
+                return cleaned_content[array_start:array_end+1]
+        
+        if '{' in cleaned_content:
+            object_start = cleaned_content.find("{")
+            object_end = cleaned_content.rfind("}")
+            if object_start != -1 and object_end != -1 and object_end > object_start:
+                return cleaned_content[object_start:object_end+1]
+                
+        # Return original if no JSON structure found
         return content
 
     async def generate_response(self, user_id: int, question: str, db: Session, log_history: bool = True, multi_message: bool = False) -> Optional[List[Dict[str, str]]]:
@@ -318,6 +361,33 @@ class PersonalityService:
             
             if "message" in result and "content" in result["message"]:
                 response_content = result["message"]["content"]
+                
+                # Check if the response looks like it contains a JSON array with code fences
+                if ("```json" in response_content or "```" in response_content) and ("[" in response_content and "]" in response_content):
+                    # Extract the JSON content from within code fences
+                    json_str = self.extract_json_from_response(response_content)
+                    try:
+                        # Parse the extracted JSON
+                        json_data = json.loads(json_str)
+                        # If it's an array with content objects, use those directly
+                        if isinstance(json_data, list) and all(isinstance(item, dict) and "content" in item for item in json_data):
+                            # Add type if missing
+                            for item in json_data:
+                                if "type" not in item:
+                                    item["type"] = "text"
+                            
+                            # Store each message in ConversationHistory
+                            if log_history:
+                                for message in json_data:
+                                    ai_history_entry = ConversationHistory(user_id=user_id, role='ai', content=message["content"])
+                                    db.add(ai_history_entry)
+                                db.commit()
+                            
+                            self._add_to_cache(self._get_cache_key(user_id, question), json.dumps(json_data))
+                            return json_data
+                    except Exception as e:
+                        print(f"Failed to process embedded JSON: {str(e)}")
+                        # Continue with normal processing
                 
                 # If the response looks like a JSON array, parse it and return as a list of messages
                 if response_content.strip().startswith("[") and response_content.strip().endswith("]"):
