@@ -69,21 +69,45 @@ class PromptManager:
         Raises:
             KeyError: If the template does not exist
         """
+        # Get the raw template
         template = self.get_template(template_name)
         
-        # Handle special case for dict and list values
-        formatted_kwargs = {}
-        for key, value in kwargs.items():
-            if isinstance(value, dict) and value:
-                # Format dict as comma-separated key-value pairs
-                formatted_kwargs[key] = ', '.join([f'{k}: {v}' for k, v in value.items()])
-            elif isinstance(value, list) and value:
-                # Format list as comma-separated values
-                formatted_kwargs[key] = ', '.join(value)
-            else:
-                formatted_kwargs[key] = value
-        
-        return template.format(**formatted_kwargs)
+        # Special handling for personality_simulation template
+        if template_name == "personality_simulation":
+            # For this template, we'll use a different approach
+            # First, prepare the replacement values
+            formatted_kwargs = {}
+            for key, value in kwargs.items():
+                if isinstance(value, dict) and value:
+                    # Format dict as comma-separated key-value pairs
+                    formatted_kwargs[key] = ', '.join([f'{k}: {v}' for k, v in value.items()])
+                elif isinstance(value, list) and value:
+                    # Format list as comma-separated values
+                    formatted_kwargs[key] = ', '.join(value)
+                else:
+                    formatted_kwargs[key] = value
+            
+            # Replace all format specifiers one by one
+            formatted_template = template
+            for key, value in formatted_kwargs.items():
+                formatted_template = formatted_template.replace('{' + key + '}', str(value))
+            
+            return formatted_template
+        else:
+            # Use standard Python formatting for other templates
+            # Handle special case for dict and list values
+            formatted_kwargs = {}
+            for key, value in kwargs.items():
+                if isinstance(value, dict) and value:
+                    # Format dict as comma-separated key-value pairs
+                    formatted_kwargs[key] = ', '.join([f'{k}: {v}' for k, v in value.items()])
+                elif isinstance(value, list) and value:
+                    # Format list as comma-separated values
+                    formatted_kwargs[key] = ', '.join(value)
+                else:
+                    formatted_kwargs[key] = value
+            
+            return template.format(**formatted_kwargs)
 
 # Create a singleton instance
 prompt_manager = PromptManager() 
