@@ -579,7 +579,11 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             is_json_array = False
             json_collection_mode = False
             
-            async with model_provider.generate_chat(chat_messages, system_prompt=None, stream=True, format_json=True) as response:
+            # Get streaming response object
+            streaming_obj = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=True, format_json=True)
+            
+            # Use async with on the streaming object
+            async with streaming_obj as response:
                 async for line in response:
                     if line.strip():
                         try:
