@@ -72,27 +72,24 @@ class PromptManager:
         # Get the raw template
         template = self.get_template(template_name)
         
-        # Special handling for personality_simulation template
-        if template_name == "personality_simulation":
-            # For this template, we'll use a different approach
-            # First, prepare the replacement values
-            formatted_kwargs = {}
+        # Special handling for templates that contain JSON examples
+        if template_name in ["personality_simulation", "followup_generation", "response_validation"]:
+            # For these templates, we'll use string replacement to avoid issues with JSON braces
+            # Prepare the replacement values
             for key, value in kwargs.items():
                 if isinstance(value, dict) and value:
-                    # Format dict as comma-separated key-value pairs
-                    formatted_kwargs[key] = ', '.join([f'{k}: {v}' for k, v in value.items()])
+                    # Format dict as comma-separated key-value pairs if needed
+                    formatted_value = value if isinstance(value, str) else ', '.join([f'{k}: {v}' for k, v in value.items()])
                 elif isinstance(value, list) and value:
-                    # Format list as comma-separated values
-                    formatted_kwargs[key] = ', '.join(value)
+                    # Format list as comma-separated values if needed
+                    formatted_value = value if isinstance(value, str) else ', '.join(value)
                 else:
-                    formatted_kwargs[key] = value
+                    formatted_value = str(value)
+                
+                # Replace all occurrences of {key} with the formatted value
+                template = template.replace('{' + key + '}', formatted_value)
             
-            # Replace all format specifiers one by one
-            formatted_template = template
-            for key, value in formatted_kwargs.items():
-                formatted_template = formatted_template.replace('{' + key + '}', str(value))
-            
-            return formatted_template
+            return template
         else:
             # Use standard Python formatting for other templates
             # Handle special case for dict and list values
