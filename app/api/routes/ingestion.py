@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import json
 from typing import Dict, List, Optional, Any
+import httpx
 
 from app.db.database import get_db
 from app.services.ingestion_service import IngestionService
@@ -21,7 +23,8 @@ async def ingest_data(
     primary_user_info: str = Form(...),
     additional_users: Optional[str] = Form(None),
     user_mapping: Optional[str] = Form(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = None
 ):
     """
     Ingest data from various sources.
@@ -69,6 +72,24 @@ async def ingest_data(
         if result.get("status") == "error":
             raise HTTPException(status_code=400, detail=result.get("message", "Ingestion failed"))
         
+        # Trigger personality profile generation for all users (primary + additional)
+        async def trigger_profile(username: str):
+            async with httpx.AsyncClient() as client:
+                try:
+                    await client.post(
+                        f"http://localhost:8000/personalities/users/{username}/generate",
+                        timeout=10.0
+                    )
+                except Exception as e:
+                    print(f"Failed to trigger profile generation for {username}: {e}")
+
+        usernames = [primary_user_data.get('username')]
+        if additional_users_data:
+            usernames += [u.get('username') for u in additional_users_data if u.get('username')]
+        for username in set(usernames):
+            if username:
+                background_tasks.add_task(trigger_profile, username)
+
         return result
         
     except json.JSONDecodeError:
