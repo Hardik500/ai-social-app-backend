@@ -35,7 +35,7 @@ class EmbeddingService:
         # Semaphore to limit concurrent API calls
         self.semaphore = asyncio.Semaphore(5)  # Allow up to 5 concurrent embedding calls
     
-    async def generate_embedding(self, text: str) -> list[float]:
+    async def generate_embedding(self, text: str, apply_rate_limit=False) -> list[float]:
         """Generate embeddings for the given text using the selected provider with caching."""
         cache_key = self._get_cache_key(text)
         cached_embedding = await self._get_from_cache(cache_key)
@@ -43,17 +43,17 @@ class EmbeddingService:
             return cached_embedding
 
         # Use the model_provider abstraction
-        embedding = await model_provider.generate_embedding(text)
+        embedding = await model_provider.generate_embedding(text, apply_rate_limit)
 
         # Cache the embedding
         await self._add_to_cache(cache_key, embedding)
         return embedding
     
-    async def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+    async def generate_embeddings_batch(self, texts: List[str], apply_rate_limit=False) -> List[List[float]]:
         """Generate embeddings for multiple texts in parallel."""
         tasks = []
         for text in texts:
-            tasks.append(self.generate_embedding(text))
+            tasks.append(self.generate_embedding(text, apply_rate_limit))
             
         return await asyncio.gather(*tasks)
     
@@ -116,7 +116,7 @@ class EmbeddingService:
                 import asyncio
                 
                 # Generate the embedding
-                embedding = asyncio.run(self.generate_embedding(text))
+                embedding = asyncio.run(self.generate_embedding(text, apply_rate_limit=True))
                 
                 # Store it directly in the database
                 if table == "messages":
@@ -215,7 +215,7 @@ class EmbeddingAutoUpdater:
                         
                         if result:
                             # Generate embedding
-                            embedding = await self.embedding_service.generate_embedding(result)
+                            embedding = await self.embedding_service.generate_embedding(result, apply_rate_limit=True)
                             
                             # Update the embedding in the database
                             update_query = text(f"""

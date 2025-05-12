@@ -67,6 +67,7 @@ class PersonalityService:
         message_texts = [msg.content for msg in messages]
         system_prompt = prompt_manager.get_template("personality_analysis")
         traits_and_description = await self._generate_analysis(message_texts, system_prompt)
+        print(f"Traits and description generated")
         if traits_and_description is None:
             print(f"Failed to generate personality analysis for user {user.username} (ID: {user_id})")
             return None
@@ -119,8 +120,11 @@ class PersonalityService:
             participants=f"{user.username} and others",
             mood="neutral"
         )
-        embedding_task = asyncio.create_task(embedding_service.generate_embedding(description))
+        print(f"System prompt: {system_prompt}")
+        embedding_task = asyncio.create_task(embedding_service.generate_embedding(description, apply_rate_limit=True))
+        print(f"Embedding task created")
         embedding = await embedding_task
+        print(f"Embedding generated")
         if existing_profile:
             # Update the existing profile in place
             existing_profile.traits = traits_and_description
@@ -179,13 +183,16 @@ class PersonalityService:
             {"role": "user", "content": user_prompt}
         ]
         try:
-            result = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False, format_json=True)
+            # Apply rate limiting when generating personality profiles
+            result = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False, format_json=True, apply_rate_limit=True)
             if "message" in result and "content" in result["message"]:
                 content = result["message"]["content"]
                 try:
                     print(f"Raw model response content: {content}")  # Debug print
+                    print(f"Attempting to extract JSON from response...")
                     content = self.extract_json_from_response(content)
                     parsed_content = json.loads(content)
+                    print(f"Successfully parsed JSON content")
                     if not isinstance(parsed_content, dict):
                         print(f"Parsed content is not a dict: {parsed_content}")
                         return None
@@ -358,7 +365,7 @@ class PersonalityService:
         
         try:
             # Only use format_json when multi_message is True
-            result = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False, format_json=multi_message)
+            result = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False, format_json=multi_message, apply_rate_limit=False)
             
             if "message" in result and "content" in result["message"]:
                 response_content = result["message"]["content"]
@@ -539,7 +546,8 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
         ]
         
         try:
-            response = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False, format_json=True)
+            # Apply rate limiting for follow-up question generation
+            response = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=False, format_json=True, apply_rate_limit=True)
             if "message" in response and "content" in response["message"]:
                 content = response["message"]["content"]
                 try:
@@ -743,7 +751,7 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             json_collection_mode = False
             
             # Get streaming response object
-            streaming_obj = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=True, format_json=True)
+            streaming_obj = await model_provider.generate_chat(chat_messages, system_prompt=None, stream=True, format_json=True, apply_rate_limit=False)
             
             # Use async with on the streaming object
             async with streaming_obj as response:
@@ -864,7 +872,9 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             existing_profile=json.dumps(existing_traits, indent=2),
             message_count=len(new_messages)
         )
+        print(f"Formatted prompt: {formatted_prompt}")
         traits_delta = await self._generate_analysis(message_texts, formatted_prompt)
+        print(f"Traits delta generated")
         # Defensive: If traits_delta is not a dict, try to extract JSON and parse again
         if not isinstance(traits_delta, dict):
             print(f"traits_delta is not a dict: {traits_delta}")
@@ -947,7 +957,7 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             participants=f"{username} and others",
             mood="neutral"
         )
-        embedding = await embedding_service.generate_embedding(description)
+        embedding = await embedding_service.generate_embedding(description, apply_rate_limit=True)
         change_log = {
             "timestamp": time.time(),
             "new_message_count": len(new_messages),
@@ -972,7 +982,7 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
         try:
             delta_text = traits_delta.get("delta_summary", "")
             if delta_text:
-                delta_embedding = await embedding_service.generate_embedding(delta_text)
+                delta_embedding = await embedding_service.generate_embedding(delta_text, apply_rate_limit=True)
         except:
             delta_embedding = None
         existing_profile.traits = updated_traits
