@@ -123,44 +123,44 @@ class IngestionService:
             self.db.commit()
             self.db.refresh(conversation)
             
-            # Initialize user mapping if none provided
             if user_mapping is None:
                 user_mapping = {}
             
-            # Use the SlackParser to extract messages
-            parsed_messages = SlackParser.parse(har_data)
+            # Build set of known user_ids (those present in user_mapping)
+            known_user_ids = set(user_mapping.keys())
             
-            # Map of user IDs/usernames to database user IDs
+            # Find all user_ids in the HAR file
+            all_user_ids = set()
+            # Use SlackParser to extract all user_ids (without filtering)
+            all_parsed_messages = SlackParser.parse(har_data)
+            for msg in all_parsed_messages:
+                uid = msg.get('user_id')
+                if uid:
+                    all_user_ids.add(uid)
+            
+            # unknown_users = all user_ids not in user_mapping
+            unknown_users = all_user_ids - known_user_ids
+            
+            # Now parse again, skipping unknown users
+            parsed_messages = SlackParser.parse(har_data, unknown_users=unknown_users)
+            
+            # Map of usernames to database user IDs
             username_to_db_id = {primary_user.username: primary_user.id}
             if additional_users:
                 for user in additional_users:
                     username_to_db_id[user.username] = user.id
             
-            # Store parsed messages in the database
             messages_imported = 0
-            unknown_users = set()
-            
             for parsed_msg in parsed_messages:
                 slack_user_id = parsed_msg.get('user_id')
-                
-                # Map the Slack user ID to a username if mapping exists
                 username = user_mapping.get(slack_user_id)
-                
-                # If no mapping exists, use the ID as username
-                if username is None:
-                    unknown_users.add(slack_user_id)
-                    username = f"unknown_{slack_user_id}"
-                
-                # Get or create user
-                if username in username_to_db_id:
-                    db_user_id = username_to_db_id[username]
-                else:
-                    # Create user if not found
+                if not username:
+                    continue  # skip unknown users
+                db_user_id = username_to_db_id.get(username)
+                if not db_user_id:
                     user = self._get_user_by_username_or_create(username)
                     db_user_id = user.id
                     username_to_db_id[username] = db_user_id
-                
-                # Create message
                 message = Message(
                     conversation_id=conversation.id,
                     user_id=db_user_id,
@@ -169,24 +169,19 @@ class IngestionService:
                 )
                 self.db.add(message)
                 messages_imported += 1
-            
             self.db.commit()
-            
             result = {
                 "status": "success",
                 "conversation_id": conversation.id,
                 "messages_imported": messages_imported
             }
-            
             # Add warning if unknown users found
             if unknown_users:
                 result["warnings"] = {
                     "unknown_users": list(unknown_users),
                     "message": "Some user IDs could not be mapped to usernames. Consider providing a user_mapping."
                 }
-            
             return result
-            
         except Exception as e:
             self.db.rollback()
             logger.error(f"Error processing Slack data: {str(e)}")
