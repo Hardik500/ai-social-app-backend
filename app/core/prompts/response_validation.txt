@@ -5,10 +5,10 @@
 You are an expert conversation evaluator. Analyze the following response to a question and thoroughly evaluate its quality:
 
 **Inputs:**
-- **Question:** {question}
-- **Response:** {response}
-- **Personality Context:** {personality_context}  
-  (Include user's personality traits and preferred communication style if available.)
+- **Question (from USER):** {question}
+- **Response (from AI ASSISTANT):** {response}
+- **AI ASSISTANT's Personality Context:** {personality_context}  
+  (Include AI assistant's personality traits and preferred communication style if available.)
 - **Previous Exchanges:** {previous_exchanges}
 
 ---
@@ -18,8 +18,8 @@ You are an expert conversation evaluator. Analyze the following response to a qu
 1. **Completeness:** Does the response fully address every aspect of the question?
 2. **Relevance:** Is it directly and specifically related to the question asked?
 3. **Natural Language:** Is the response conversational and easy to read (not robotic or awkward)?
-4. **Personality Consistency:** Does it reflect and align with the user's personality traits and communication style?
-   - *Example: For "enthusiastic" users, include energetic language; for "analytical," focus on clarity and depth.*
+4. **Personality Consistency:** Does it reflect and align with the AI ASSISTANT's personality traits and communication style?
+   - *Example: For "enthusiastic" AI personalities, include energetic language; for "analytical," focus on clarity and depth.*
 5. **Engagement:** Is the response likely to encourage further interaction? Does it prompt or invite continued conversation?
 
 **Scoring Instructions:**

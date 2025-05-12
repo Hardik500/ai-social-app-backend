@@ -83,6 +83,7 @@ class ResponseValidator:
         return ValidationResult(False, 0.0, ["No response from model"], False, None, "low")
 
     async def generate_followup(self, question: str, response: str, personality_traits: Dict[str, Any], engagement_level: str, previous_exchanges: Optional[List[Dict[str, str]]] = None, preferred_communication_style: Optional[str] = None) -> Dict[str, str]:
+        # Enhance the prompt with explicit role information
         prompt = prompt_manager.format_template(
             "followup_generation",
             question=question,
@@ -92,6 +93,10 @@ class ResponseValidator:
             previous_exchanges=json.dumps(previous_exchanges) if previous_exchanges else "[]",
             preferred_communication_style=preferred_communication_style or "casual"
         )
+        
+        # Add explicit instruction to prevent AI from questioning itself
+        prompt += "\n\nIMPORTANT: Remember, you are generating the next question that the AI should ask the USER, not a follow-up to the AI's own message."
+        
         result = await model_provider.generate_chat(
             [{"role": "system", "content": prompt}],
             format_json=True
