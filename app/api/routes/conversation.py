@@ -497,4 +497,74 @@ def clear_conversation_history_by_email(email: str, db: Session = Depends(get_db
         )
     db.query(ConversationHistory).filter(ConversationHistory.user_id == user.id).delete()
     db.commit()
-    return {"status": "success", "message": f"Cleared conversation history for user with email {email}"} 
+    return {"status": "success", "message": f"Cleared conversation history for user with email {email}"}
+
+@router.delete("/messages/user/{user_id}")
+def delete_user_messages(user_id: int, db: Session = Depends(get_db)):
+    """Delete all messages from a specific user by user ID."""
+    # Check if user exists
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with ID {user_id} not found"
+        )
+    
+    # Get all messages from the user
+    messages = db.query(Message).filter(Message.user_id == user_id).all()
+    
+    # If no messages found, return appropriate response
+    if not messages:
+        return {
+            "status": "success",
+            "message": f"No messages found for user with ID {user_id}",
+            "count": 0
+        }
+    
+    # Count messages for reporting
+    count = len(messages)
+    
+    # Delete all messages from the user
+    db.query(Message).filter(Message.user_id == user_id).delete()
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Deleted {count} messages from user with ID {user_id}",
+        "count": count
+    }
+
+@router.delete("/messages/email/{email}")
+def delete_user_messages_by_email(email: str, db: Session = Depends(get_db)):
+    """Delete all messages from a specific user by email."""
+    # Check if user exists
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with email {email} not found"
+        )
+    
+    # Get all messages from the user
+    messages = db.query(Message).filter(Message.user_id == user.id).all()
+    
+    # If no messages found, return appropriate response
+    if not messages:
+        return {
+            "status": "success",
+            "message": f"No messages found for user with email {email}",
+            "count": 0
+        }
+    
+    # Count messages for reporting
+    count = len(messages)
+    
+    # Delete all messages from the user
+    db.query(Message).filter(Message.user_id == user.id).delete()
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Deleted {count} messages from user with email {email}",
+        "count": count
+    } 
