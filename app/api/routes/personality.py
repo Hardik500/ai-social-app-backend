@@ -14,7 +14,7 @@ from app.models.personality import PersonalityProfile
 from app.models.schemas import PersonalityProfileResponse, QuestionRequest, AnswerResponse, UserResponse
 from app.services.personality_service import personality_service
 from app.services.embedding_service import embedding_service
-from app.models.conversation import Message
+from app.models.conversation import Message, ConversationHistory
 from app.services.response_validator import response_validator
 
 router = APIRouter(
@@ -405,11 +405,27 @@ async def _handle_question_request(
             preferred_communication_style=preferred_communication_style
         )
         if followup and followup.get("followup_question"):
+            # Add follow-up to answers array for response
             answers.append({
                 "content": followup["followup_question"],
                 "type": "followup",
                 "reasoning": followup.get("reasoning")
             })
+            
+            # Store the follow-up message in ConversationHistory
+            try:
+                print(f"Storing follow-up message in conversation history for user {user.username}: {followup['followup_question']}")
+                followup_history_entry = ConversationHistory(
+                    user_id=user.id, 
+                    role='ai', 
+                    content=followup['followup_question']
+                )
+                db.add(followup_history_entry)
+                db.commit()
+                print(f"Successfully stored follow-up message in conversation history")
+            except Exception as e:
+                print(f"Error storing follow-up message in conversation history: {str(e)}")
+                # Continue anyway - we don't want to fail the whole request if just the follow-up storage fails
     print(f"Followup generated for user {user.username}: {followup}")
 
     # Create conversation context with relevant information

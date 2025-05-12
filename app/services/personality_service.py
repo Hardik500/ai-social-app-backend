@@ -7,7 +7,7 @@ import time
 import hashlib
 import redis
 from sqlalchemy.orm import Session
-from sqlalchemy import asc
+from sqlalchemy import asc, desc
 from app.models.user import User
 from app.models.conversation import Message, ConversationHistory
 from app.models.personality import PersonalityProfile
@@ -16,6 +16,7 @@ from app.core.prompt_manager import prompt_manager
 from app.services.model_provider import model_provider
 import re
 import dateutil.parser
+from app.services.response_validator import response_validator
 
 class PersonalityService:
     def __init__(self):
@@ -602,6 +603,81 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
             }) + "\n"
             return
             
+        # Helper method to generate and store follow-up messages
+        async def generate_and_store_followup(raw_response, messages):
+            try:
+                # Extract previous exchanges for context
+                previous_exchanges = []
+                history_entries = db.query(ConversationHistory).filter(
+                    ConversationHistory.user_id == user_id
+                ).order_by(desc(ConversationHistory.created_at)).limit(10).all()
+                
+                for entry in reversed(history_entries):
+                    previous_exchanges.append({
+                        "role": entry.role,
+                        "content": entry.content,
+                        "timestamp": str(entry.created_at) if hasattr(entry, 'created_at') else ""
+                    })
+                
+                # Get communication style from profile
+                preferred_communication_style = None
+                if profile.traits and isinstance(profile.traits, dict):
+                    comm_style = profile.traits.get("communication_style")
+                    if isinstance(comm_style, str):
+                        preferred_communication_style = comm_style
+                    elif isinstance(comm_style, dict):
+                        preferred_communication_style = ", ".join(f"{k}: {v}" for k, v in comm_style.items())
+                
+                # Validate the response
+                validation_result = await response_validator.validate_response(
+                    question=question,
+                    response=raw_response,
+                    personality_context={
+                        "traits": profile.traits,
+                        "communication_style": profile.traits.get("communication_style", {}),
+                        "interests": profile.traits.get("interests", [])
+                    },
+                    previous_exchanges=previous_exchanges,
+                    preferred_communication_style=preferred_communication_style
+                )
+                
+                # Generate follow-up if needed
+                if validation_result.is_valid and validation_result.needs_followup:
+                    followup = await response_validator.generate_followup(
+                        question=question,
+                        response=raw_response,
+                        personality_traits=profile.traits,
+                        engagement_level=validation_result.engagement_level,
+                        previous_exchanges=previous_exchanges,
+                        preferred_communication_style=preferred_communication_style
+                    )
+                    
+                    if followup and followup.get("followup_question"):
+                        # Add follow-up to the messages
+                        followup_msg = {
+                            "content": followup["followup_question"],
+                            "type": "followup",
+                            "reasoning": followup.get("reasoning")
+                        }
+                        messages.append(followup_msg)
+                        
+                        # Store the follow-up in conversation history
+                        followup_history_entry = ConversationHistory(
+                            user_id=user_id, 
+                            role='ai', 
+                            content=followup["followup_question"]
+                        )
+                        db.add(followup_history_entry)
+                        db.commit()
+                        
+                        print(f"Added follow-up message to response: {followup['followup_question']}")
+                
+                return messages
+            except Exception as e:
+                print(f"Error generating follow-up for streaming response: {str(e)}")
+                # Continue anyway - we don't want to fail the whole response if just the follow-up fails
+                return messages
+            
         # Log user message in history
         user_history_entry = ConversationHistory(user_id=user_id, role='user', content=question)
         db.add(user_history_entry)
@@ -724,8 +800,11 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
                             db.add(ai_history_entry)
                         db.commit()
                         
+                        # Generate follow-up if needed
+                        messages = await generate_and_store_followup(raw_response, messages)
+                        
                         # Cache and return the parsed messages
-                        self._add_to_cache(cache_key, raw_response)
+                        self._add_to_cache(cache_key, json.dumps(messages))
                         yield json.dumps({
                             "type": "complete",
                             "content": messages,
@@ -751,6 +830,9 @@ Return only the questions as a JSON array of strings. Make sure the questions ar
                     )
                     db.add(ai_history_entry)
                     db.commit()
+                    
+                    # Generate follow-up if needed
+                    messages = await generate_and_store_followup(raw_response, messages)
                     
                     # Cache the message as JSON array
                     self._add_to_cache(cache_key, json.dumps(messages))
