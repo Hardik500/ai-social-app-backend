@@ -161,10 +161,15 @@ class IngestionService:
                     user = self._get_user_by_username_or_create(username)
                     db_user_id = user.id
                     username_to_db_id[username] = db_user_id
+                
+                # Replace user mentions in the message content
+                content = parsed_msg.get('text', '')
+                content = self._replace_user_mentions(content, user_mapping)
+                
                 message = Message(
                     conversation_id=conversation.id,
                     user_id=db_user_id,
-                    content=parsed_msg.get('text', ''),
+                    content=content,
                     timestamp=parsed_msg.get('timestamp', '')
                 )
                 self.db.add(message)
@@ -186,6 +191,31 @@ class IngestionService:
             self.db.rollback()
             logger.error(f"Error processing Slack data: {str(e)}")
             return {"status": "error", "message": str(e)}
+    
+    def _replace_user_mentions(self, text: str, user_mapping: Dict[str, str]) -> str:
+        """
+        Replace Slack user mentions (e.g., <@U055WM6DTJL>) with actual usernames.
+        
+        Args:
+            text: Message text
+            user_mapping: Mapping from user IDs to usernames
+            
+        Returns:
+            Text with user mentions replaced by usernames
+        """
+        import re
+        
+        # Find all user mentions in the format <@USER_ID>
+        user_mention_pattern = r'<@([A-Z0-9]+)>'
+        
+        def replace_mention(match):
+            user_id = match.group(1)
+            if user_id in user_mapping:
+                return f"{user_mapping[user_id]}"
+            return match.group(0)  # Return original if no mapping
+            
+        # Replace all user mentions
+        return re.sub(user_mention_pattern, replace_mention, text)
     
     def _process_whatsapp_data(self, 
                              data: Any, 
