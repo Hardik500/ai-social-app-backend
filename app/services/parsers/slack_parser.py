@@ -57,14 +57,22 @@ class SlackParser:
             
             # Extract messages if available
             messages = content_json.get('messages', [])
-            if not isinstance(messages, list):
-                continue
+            if isinstance(messages, list):
+                for message in messages:
+                    parsed_message = SlackParser._extract_message_data(message)
+                    if parsed_message:
+                        parsed_messages.append(parsed_message)
             
-            # Process each message
-            for message in messages:
-                parsed_message = SlackParser._extract_message_data(message)
-                if parsed_message:
-                    parsed_messages.append(parsed_message)
+            # Extract messages from messages_data if available
+            messages_data = content_json.get('messages_data', {})
+            if isinstance(messages_data, dict):
+                for channel_data in messages_data.values():
+                    channel_messages = channel_data.get('messages', [])
+                    if isinstance(channel_messages, list):
+                        for message in channel_messages:
+                            parsed_message = SlackParser._extract_message_data(message)
+                            if parsed_message:
+                                parsed_messages.append(parsed_message)
         
         return parsed_messages
     
