@@ -11,17 +11,21 @@ class SlackParser:
     """
     
     @staticmethod
-    def parse(har_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def parse(har_data: Dict[str, Any], unknown_users: Optional[set] = None) -> List[Dict[str, Any]]:
         """
         Parse Slack HAR data to extract messages.
         
         Args:
             har_data: HAR file data
+            unknown_users: Optional set of user_ids to skip
             
         Returns:
             List of dictionaries with message data
         """
         parsed_messages = []
+        
+        if unknown_users is None:
+            unknown_users = set()
         
         # Ensure we have valid HAR data
         if isinstance(har_data, str):
@@ -60,7 +64,7 @@ class SlackParser:
             if isinstance(messages, list):
                 for message in messages:
                     parsed_message = SlackParser._extract_message_data(message)
-                    if parsed_message:
+                    if parsed_message and parsed_message.get('user_id') not in unknown_users:
                         parsed_messages.append(parsed_message)
             
             # Extract messages from messages_data if available
@@ -71,7 +75,7 @@ class SlackParser:
                     if isinstance(channel_messages, list):
                         for message in channel_messages:
                             parsed_message = SlackParser._extract_message_data(message)
-                            if parsed_message:
+                            if parsed_message and parsed_message.get('user_id') not in unknown_users:
                                 parsed_messages.append(parsed_message)
         
         return parsed_messages
