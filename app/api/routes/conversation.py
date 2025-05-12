@@ -435,10 +435,45 @@ def get_conversation_history(user_id: int, db: Session = Depends(get_db)):
     """Get all conversation history for a user (single session)."""
     return db.query(ConversationHistory).filter(ConversationHistory.user_id == user_id).order_by(ConversationHistory.created_at).all()
 
+@router.get("/history/email/{email}", response_model=List[ConversationHistoryResponse])
+def get_conversation_history_by_email(email: str, db: Session = Depends(get_db)):
+    """Get all conversation history for a user by email (single session)."""
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with email '{email}' not found"
+        )
+    return db.query(ConversationHistory).filter(ConversationHistory.user_id == user.id).order_by(ConversationHistory.created_at).all()
+
 @router.post("/history/", response_model=ConversationHistoryResponse)
 def add_conversation_history(entry: ConversationHistoryCreate, db: Session = Depends(get_db)):
     """Add a message to the conversation history (single session)."""
     new_entry = ConversationHistory(**entry.dict())
+    db.add(new_entry)
+    db.commit()
+    db.refresh(new_entry)
+    return new_entry
+
+@router.post("/history/email/", response_model=ConversationHistoryResponse)
+def add_conversation_history_by_email(
+    entry: ConversationHistoryCreate, 
+    email: str,
+    db: Session = Depends(get_db)
+):
+    """Add a message to the conversation history using email instead of user_id."""
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with email '{email}' not found"
+        )
+    
+    # Override the user_id with the one found from email
+    entry_dict = entry.dict()
+    entry_dict["user_id"] = user.id
+    
+    new_entry = ConversationHistory(**entry_dict)
     db.add(new_entry)
     db.commit()
     db.refresh(new_entry)
@@ -449,4 +484,17 @@ def clear_conversation_history(user_id: int, db: Session = Depends(get_db)):
     """Clear all conversation history for a user (single session)."""
     db.query(ConversationHistory).filter(ConversationHistory.user_id == user_id).delete()
     db.commit()
-    return {"status": "success", "message": f"Cleared conversation history for user {user_id}"} 
+    return {"status": "success", "message": f"Cleared conversation history for user {user_id}"}
+
+@router.delete("/history/email/{email}")
+def clear_conversation_history_by_email(email: str, db: Session = Depends(get_db)):
+    """Clear all conversation history for a user by email (single session)."""
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with email '{email}' not found"
+        )
+    db.query(ConversationHistory).filter(ConversationHistory.user_id == user.id).delete()
+    db.commit()
+    return {"status": "success", "message": f"Cleared conversation history for user with email {email}"} 
