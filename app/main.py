@@ -15,7 +15,7 @@ Base.metadata.create_all(bind=engine)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="AI Social App Backend",
+    title="Real-Character.AI Backend",
     description="API for a personality-based social application",
     version="0.1.0"
 )

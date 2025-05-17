@@ -253,7 +253,7 @@ async def search_similar_messages(query):
 
 async def run_sanity_check():
     """Run the full sanity check flow"""
-    console.print("[bold yellow]=== AI Social App Backend Sanity Check ===[/bold yellow]")
+    console.print("[bold yellow]=== Real-Character.AI Backend Sanity Check ===[/bold yellow]")
     console.print(f"API URL: {API_URL}")
     console.print(f"Run ID: {run_id}")
     

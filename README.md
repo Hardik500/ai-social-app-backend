@@ -1,4 +1,4 @@
-# AI Social App Backend
+# Real-Character.AI Backend
 
 A backend application for a personality-based social app that allows uploading Slack conversations and associating them with personalities.
 
